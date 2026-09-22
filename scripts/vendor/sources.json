@@ -1,0 +1,11 @@
+{
+  "upstream": "basalt-monado",
+  "commit": "a0c4fdfc103778510523e89a99242af09f23d4fa",
+  "original_sha256": {
+    "rig_calibration.py": "37eddff56bdbfc8a18e8911645a0d30050909562699b159ca912e023ee646839",
+    "capture_pipeline_common.py": "8346a04c775321df9e663c69b0dbc59c12252272ecd2bf3c1fb492c13a2364ca",
+    "interpolate_mocap_to_vio.py": "48e9d4f4584bb189c5cdbac70542d28f06c5038675d3fd08f15ee960258d4807",
+    "extend_evo_stats.py": "3323e498a0741d6e654afb372306ba5982cc0f6158e10e5d37460490937ea659"
+  },
+  "local_changes": "None at import; changes recorded in project history"
+}

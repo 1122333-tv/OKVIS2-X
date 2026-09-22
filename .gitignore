@@ -5,3 +5,8 @@
 *.png
 *.asv
 /documentation
+
+# Local evaluation artifacts and Python caches
+/results/
+__pycache__/
+/.ua/
