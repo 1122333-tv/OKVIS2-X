@@ -51,7 +51,15 @@ def generate(run, automatic=False):
                     '已准备数据仍引用 Basalt run，源目录及链接目标需要持续可读。','运行成功不代表精度验收通过。']}
     e=lambda v:html.escape(str(v),quote=True)
     def pretty(v):return '<pre>'+e(json.dumps(v,ensure_ascii=False,indent=2))+'</pre>'
+    def file_block(description,path,value,field=None,raw=False):
+        location=str(path)
+        body=('<pre>'+e(path.read_text())+'</pre>') if raw and path.is_file() else pretty(value)
+        if not path.is_file() and path != run/'report/report_data.json':
+            body='<p>文件缺失，暂无内容。</p>'
+        label='查看完整文件内容' if field is None else '查看内容（'+field+'）'
+        return '<div class="file-block"><p>'+e(description)+'</p><p class="file-path">文件：<code>'+e(location)+'</code></p><details><summary>'+e(label)+'</summary>'+body+'</details></div>'
     def table(headers,records,cls=''):
+
         return '<table class="'+cls+'"><thead><tr>'+''.join('<th>'+e(h)+'</th>' for h in headers)+'</tr></thead><tbody>'+''.join('<tr>'+''.join('<td>'+e(v)+'</td>' for v in row)+'</tr>' for row in records)+'</tbody></table>'
     metric_names={'ape_translation':'APE 平移','rpe_translation_0.1m':'RPE 平移 · 0.1 m',
                   'rpe_translation_0.5m':'RPE 平移 · 0.5 m','rpe_translation_1m':'RPE 平移 · 1 m'}
@@ -69,7 +77,7 @@ def generate(run, automatic=False):
                 s=r.get('metrics',{}).get(metric,{})
                 rows.append([metric_names.get(metric,metric),algorithms.get(name,name)]+[
                     format(s[k],'.6g') if isinstance(s.get(k),float) else s.get(k,'—') for k in keys])
-        return '<div class="table-scroll">'+table(headers,rows,'metrics')+'</div><details><summary>完整精度数值与不可计算原因</summary>'+pretty(records)+'</details>'
+        return '<div class="table-scroll">'+table(headers,rows,'metrics')+'</div>'+file_block('完整精度指标、轨迹匹配统计及不可计算原因。',artifact(run,'comparison'),records,scope)
     images=[]
     def figure(p):
         if not p.is_file():return '<p>暂无图表</p>'
@@ -88,28 +96,33 @@ def generate(run, automatic=False):
         return '<p>点击图像放大。各图沿用原始坐标轴范围和色标，请结合数值比较。</p><div class="table-scroll"><table class="plots"><colgroup><col style="width:14%"><col style="width:43%"><col style="width:43%"></colgroup><thead><tr><th>指标 / 图表</th><th>OKVIS2</th><th>Basalt</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
     sections=[]
     def section(id,title,body):sections.append((id,title,'<section id="'+id+'"><h2>'+e(title)+'</h2>'+body+'</section>'))
-    section('overview','输入与运行状态','<p>'+e(run.name)+'</p>'+pretty(m['parameters'])+pretty({k:v.get('status') for k,v in m['stages'].items()}))
-    section('reference','参考轨迹与 GT',''.join('<p>'+e(v)+'</p>' for v in data['limits'])+pretty(gt)+pretty(offset))
-    section('config','配置差异','<label>搜索配置 <input id="search" type="search"></label>'+''.join('<h3>'+e(k)+'</h3>'+table(['字段','变化','原值','运行值'],rows,'config') for k,rows in changes.items()))
-    section('coverage','覆盖率与资源统计',pretty(vio))
+    section('overview','输入与运行状态','<p>'+e(run.name)+'</p>'+file_block('运行输入参数、数据引用及各阶段状态。',run/'manifest.yaml',{'parameters':m['parameters'],'stages':m['stages']},'parameters / stages；自动报告生成时显示预期完成状态' if automatic else 'parameters / stages'))
+    section('reference','参考轨迹与 GT',''.join('<p>'+e(v)+'</p>' for v in data['limits'])+file_block('导入 GT 的转换记录及有效时间段；仅展示来源记录，不重复变换 GT。',run/'02_reference/inputs/groundtruth/conversion.json',gt)+file_block('导入的时间对齐记录；仅作来源说明。',run/'02_reference/inputs/time_alignment/total_offset.json',offset))
+    config_paths=[['默认','工程默认配置的运行快照',run/'01_preparation/inputs/default_config.yaml'],
+                  ['用户','用户选择的配置模板快照（未指定 --config 时使用默认模板）',run/'01_preparation/inputs/algorithm_template.yaml'],
+                  ['运行','实际交给 OKVIS 的最终配置',artifact(run,'config')]]
+    section('config','配置差异',table(['配置','说明','具体路径'],config_paths)+
+            ''.join('<h3>'+e(k)+'</h3>'+table(['字段','变化',*(['默认值','用户值'] if k=='默认到用户' else ['用户值','运行值'])],rows,'config') for k,rows in changes.items())+
+            file_block('完整运行配置，包含相机标定、mask 路径、时间偏移和算法参数。',artifact(run,'config'),effective,raw=True))
+    section('coverage','覆盖率与资源统计',file_block('VIO 输出帧数、缺帧、首尾覆盖、特征统计和运行资源汇总。',artifact(run,'vio_summary'),vio))
     section('metrics','Common · APE / RPE','<p>在双方与 GT 均有效的共同时间戳上评测，各自进行 SE(3) 无尺度对齐。表内数值显示 6 位有效数字；完整精度见下方展开项。不可计算的指标显示 —。</p>'+metric_table('common'))
     section('figures','Common · 图表对比',paired_figures('common'))
     section('native','Native · 各自覆盖范围','<details><summary>展开 Native 指标与图表</summary><p>各算法使用自身与 GT 匹配的有效时间戳。</p>'+metric_table('native')+paired_figures('native')+'</details>')
     section('masks','Mask','<details><summary>展开 Mask 图像</summary>'+(''.join(figure(p) for p in sorted((run/'01_preparation/outputs/masks').glob('*.png'))) or '<p>暂无 Mask 图像</p>')+'</details>')
-    section('diagnostics','对齐诊断',''.join(figure(p) for p in sorted((run/'04_vio_comparison').glob('*.png')))+ '<details><summary>评测元信息与诊断</summary>'+pretty({k:v for k,v in comp.items() if k not in ('native','common')})+'</details>')
-    section('sources','来源与缺失项',pretty(ref)+'<h3>缺失项</h3>'+pretty(missing))
+    section('diagnostics','对齐诊断',''.join(figure(p) for p in sorted((run/'04_vio_comparison').glob('*.png')))+file_block('对齐方式、评测时间范围、共同时间戳及对齐诊断。',artifact(run,'comparison'),{k:v for k,v in comp.items() if k not in ('native','common')},'除 native / common 外的字段'))
+    section('sources','来源与缺失项',file_block('导入参考文件的原始来源路径和 SHA-256。',run/'02_reference/inputs/sources.json',ref)+file_block('生成报告时未找到的输入文件清单；空列表表示未发现缺失。',run/'report/report_data.json',missing,'missing'))
     def safe(v):
         if isinstance(v,int) and not isinstance(v,bool) and abs(v)>2**53-1:return str(v)
         if isinstance(v,dict):return {k:safe(x) for k,x in v.items()}
         if isinstance(v,list):return [safe(x) for x in v]
         return v
     page='''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OKVIS VIO 评测报告</title>
-<style>body{max-width:1200px;margin:32px auto;padding:0 24px;font:16px/1.65 system-ui;color:#202b36;background:#fafbfc}nav{display:flex;gap:18px;flex-wrap:wrap}a{color:#155c9c}section{margin:30px 0;padding:22px;background:white;border:1px solid #dbe2e8;border-radius:10px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{border:1px solid #dbe2e8;padding:8px;text-align:left;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-height:420px;overflow:auto}img{max-width:100%}.zoom{background:none;border:0;cursor:zoom-in;width:100%}figure{margin:20px 0}figcaption{font-size:12px;overflow-wrap:anywhere}input{padding:8px;width:300px}dialog{max-width:95vw;max-height:95vh;padding:12px}dialog img{max-height:85vh}button{padding:8px} @media print{nav,input,dialog{display:none}pre{max-height:none;overflow:visible}section{break-inside:auto}figure{break-inside:avoid}}</style>
+<style>body{max-width:1200px;margin:32px auto;padding:0 24px;font:16px/1.65 system-ui;color:#202b36;background:#fafbfc}nav{display:flex;gap:18px;flex-wrap:wrap}a{color:#155c9c}section{margin:30px 0;padding:22px;background:white;border:1px solid #dbe2e8;border-radius:10px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{border:1px solid #dbe2e8;padding:8px;text-align:left;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-height:420px;overflow:auto}img{max-width:100%}.zoom{background:none;border:0;cursor:zoom-in;width:100%}figure{margin:20px 0}figcaption{font-size:12px;overflow-wrap:anywhere}.file-path{overflow-wrap:anywhere;font-size:13px}.file-block{margin:18px 0}dialog{max-width:95vw;max-height:95vh;padding:12px}dialog img{max-height:85vh}button{padding:8px} @media print{nav,input,dialog{display:none}pre{max-height:none;overflow:visible}section{break-inside:auto}figure{break-inside:avoid}}</style>
 <style>.table-scroll{overflow-x:auto}.metrics{white-space:nowrap}.metrics td,.metrics th{overflow-wrap:normal}.plots{table-layout:fixed;min-width:760px}.plots td{vertical-align:top}.plots figure{margin:0}.plots .zoom{padding:0}summary{cursor:pointer;font-weight:600}details{margin:14px 0}body{max-width:1560px}</style>
 <h1>OKVIS VIO 评测报告</h1>'''
     page+='<nav>'+''.join('<a href="#'+id+'">'+e(title)+'</a>' for id,title,_ in sections)+'</nav>'+''.join(body for _,_,body in sections)
     page+='''<dialog id="viewer"><button id="close">关闭</button><img id="large" alt="放大的评测图"></dialog><script>
-const viewer=document.getElementById('viewer');document.querySelectorAll('.zoom').forEach(b=>b.onclick=()=>{document.getElementById('large').src=b.querySelector('img').src;viewer.showModal()});document.getElementById('close').onclick=()=>viewer.close();document.getElementById('search').oninput=e=>document.querySelectorAll('table.config tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(e.target.value.toLowerCase()));window.addEventListener('beforeprint',()=>document.querySelectorAll('details').forEach(d=>d.open=true));
+const viewer=document.getElementById('viewer');document.querySelectorAll('.zoom').forEach(b=>b.onclick=()=>{document.getElementById('large').src=b.querySelector('img').src;viewer.showModal()});document.getElementById('close').onclick=()=>viewer.close();window.addEventListener('beforeprint',()=>document.querySelectorAll('details').forEach(d=>d.open=true));
 </script></html>'''
     target=run/'report';target.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=target,prefix='.generate-') as tmp:
