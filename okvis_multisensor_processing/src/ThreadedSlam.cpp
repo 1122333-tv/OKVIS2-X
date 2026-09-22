@@ -18,6 +18,7 @@
  */
 
 #include <map>
+#include <okvis/ImuSupport.hpp>
 
 #include <pthread.h>
 #include <sched.h>
@@ -42,7 +43,7 @@ namespace okvis
 static const int cameraInputQueueSize = 2;
 
 // overlap of imu data before and after two consecutive frames [seconds]:
-static const double imuTemporalOverlap = 0.02;
+// Defined in ImuSupport.hpp for estimator, reader and binary capability query.
 
 
 // Constructor.

@@ -50,8 +50,10 @@ public:
   /// @param numCameras The total number of cameras.
   /// @param syncCameras Camera group to force synchronisation.
   /// @param deltaT Duration [s] to skip in the beginning.
+  /// @param imageDelay Corrected image time is raw image time minus this delay.
   DatasetReader(const std::string& path, size_t numCameras, const std::set<size_t> & syncCameras,
-                const Duration & deltaT = Duration(0.0), const std::optional<GpsParameters>& gpsParameters = std::nullopt);
+                const Duration & deltaT = Duration(0.0), const std::optional<GpsParameters>& gpsParameters = std::nullopt,
+                const Duration & imageDelay = Duration(0.0));
 
   /// @brief Destructor: stops streaming.
   virtual ~DatasetReader();
@@ -109,6 +111,8 @@ private:
   std::set<size_t> syncCameras_; ///< Camera group to force synchronisation.
 
   Duration deltaT_ = okvis::Duration(0.0); ///< Skip duration [s].
+
+  Duration imageDelay_; ///< Camera timestamp correction; support is defined in ImuSupport.hpp.
 
   // gps stuff...
   std::atomic_bool gpsFlag_; ///< Flag specifying if gps data is available / used.

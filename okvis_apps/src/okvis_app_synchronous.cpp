@@ -18,6 +18,7 @@
  */
 
 #include <iostream>
+#include <okvis/ImuSupport.hpp>
 #include <fstream>
 #include <stdlib.h>
 #include <memory>
@@ -46,6 +47,11 @@
 /// \param argv argv.
 int main(int argc, char **argv)
 {
+
+  if (argc == 2 && std::string(argv[1]) == "--imu-support-ns") {
+    std::cout << okvis::imuTemporalOverlapNs << std::endl;
+    return EXIT_SUCCESS;
+  }
 
   google::InitGoogleLogging(argv[0]);
   FLAGS_stderrthreshold = 0;  // INFO: 0, WARNING: 1, ERROR: 2, FATAL: 3
@@ -91,7 +97,8 @@ int main(int argc, char **argv)
   } else {
     datasetReader.reset(new okvis::DatasetReader(
                           path, int(parameters.nCameraSystem.numCameras()),
-                          parameters.camera.sync_cameras, deltaT, parameters.gps));
+                          parameters.camera.sync_cameras, deltaT, parameters.gps,
+                          okvis::Duration(parameters.camera.image_delay)));
   }
 
   // also check DBoW2 vocabulary

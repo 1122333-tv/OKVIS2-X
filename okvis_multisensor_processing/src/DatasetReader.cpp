@@ -26,12 +26,15 @@
 #include <okvis/ViInterface.hpp>
 #include <okvis/DatasetReader.hpp>
 
+#include <okvis/ImuSupport.hpp>
+
 namespace okvis {
 
 DatasetReader::DatasetReader(
   const std::string& path, size_t numCameras, const std::set<size_t> &syncCameras,
-  const Duration & deltaT, const std::optional<GpsParameters>& gpsParameters) :
-  numCameras_(numCameras), syncCameras_(syncCameras), deltaT_(deltaT) {
+  const Duration & deltaT, const std::optional<GpsParameters>& gpsParameters,
+  const Duration & imageDelay) :
+  numCameras_(numCameras), syncCameras_(syncCameras), deltaT_(deltaT), imageDelay_(imageDelay) {
  
   if(gpsParameters) {
     gpsFlag_ = true;
@@ -468,7 +471,7 @@ void  DatasetReader::processing() {
         }
       }
 
-    } while (t_imu <= t + okvis::Duration(0.021));
+    } while (t_imu < t - imageDelay_ + okvis::Duration(imuTemporalOverlap));
 
       if(gpsFlag_){
           std::string gline;
