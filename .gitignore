@@ -8,5 +8,7 @@
 
 # Local evaluation artifacts and Python caches
 /results/
+# Calibration-specific generated masks, provenance, and generator snapshot
+/config/oak4p/layout0921_masks/
 __pycache__/
 /.ua/
