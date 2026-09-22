@@ -158,6 +158,11 @@ def main():
         shutil.copyfile(info['root']/'manifest.yaml',d/'inputs/basalt_manifest.yaml')
         shutil.copyfile(info['preparation_file'],d/'inputs/basalt_preparation.json')
         shutil.copytree(info['masks'],d/'inputs/source_masks',symlinks=False)
+        baseline_masks=info['manifest'].get('camera_masks',{})
+        if baseline_masks.get('enabled'):
+            baseline_dir=info['root']/baseline_masks.get('directory','camera_masks')
+            if baseline_dir.is_dir():
+                shutil.copytree(baseline_dir,d/'inputs/basalt_default_masks',symlinks=False)
         (d/'outputs/dataset').symlink_to(info['dataset'],target_is_directory=True)
         # Transfer only the grouping-reference offset; physical calibration comes from the supplied delivery.
         bp=info['preparation'];group=bp.get('group_time_reference');calref=bp.get('calibration_time_reference')

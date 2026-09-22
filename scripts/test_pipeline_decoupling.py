@@ -6,7 +6,70 @@ import yaml
 from PIL import Image
 from basalt_run_data import inspect, import_reference
 from pipeline_layout import dump, sha, read_manifest, artifact_hashes
-from generate_pipeline_report import generate, differences
+from generate_pipeline_report import generate, differences, compare_masks, mask_overlay
+
+
+class MaskReports(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.run=Path(self.tmp.name)/'run';self.run.mkdir()
+        self.baseline=self.run/'01_preparation/inputs/basalt_default_masks'
+        self.actual=self.run/'01_preparation/outputs/masks'
+        self.baseline.mkdir(parents=True);self.actual.mkdir(parents=True)
+        self.man={'format':'okvis-vio','version':2,'status':'complete','parameters':{},'stages':{}}
+        (self.run/'manifest.yaml').write_text(yaml.safe_dump(self.man))
+        for i in range(4):
+            Image.new('L',(4,3),0).save(self.baseline/f'cam{i}.png')
+            Image.new('L',(4,3),255).save(self.actual/f'cam{i}.png')
+    def report(self):
+        page=generate(self.run).read_text()
+        section=page.split('<section id="masks">',1)[1].split('</section>',1)[0]
+        data=json.loads((self.run/'report/report_data.json').read_text())['mask_comparison']
+        return section,data
+    def test_polarity_inversion_is_unchanged_and_collapsed(self):
+        section,data=self.report()
+        self.assertFalse(data['changed']);self.assertTrue(data['complete'])
+        self.assertNotIn('<details open>',section)
+        self.assertEqual(section.count('class="mask-grid"'),1)
+        self.assertEqual(section.count('<figure>'),4)
+    def test_changed_pixels_expand_and_count_both_directions(self):
+        image=Image.new('L',(4,3),255);image.putpixel((0,0),0);image.save(self.actual/'cam2.png')
+        image=Image.new('L',(4,3),0);image.putpixel((1,1),255);image.save(self.baseline/'cam3.png')
+        section,data=self.report()
+        self.assertIn('<details open>',section);self.assertTrue(data['changed'])
+        self.assertEqual(data['cameras'][2]['newly_excluded_pixels'],1)
+        self.assertEqual(data['cameras'][3]['newly_enabled_pixels'],1)
+        with Image.open(data['cameras'][2]['overlay_path']) as image:
+            self.assertEqual(image.getpixel((0,0)),(0,255,0))
+        with Image.open(data['cameras'][3]['overlay_path']) as image:
+            self.assertEqual(image.getpixel((1,1)),(255,0,0))
+    def test_overlay_preserves_unchanged_black_white_and_dimensions(self):
+        a=Image.new('L',(4,3),0);a.putpixel((0,0),255);a.save(self.baseline/'cam0.png')
+        b=Image.new('L',(4,3),255);b.putpixel((0,0),0);b.save(self.actual/'cam0.png')
+        image=mask_overlay(self.baseline/'cam0.png',self.actual/'cam0.png')
+        self.assertEqual(image.size,(4,3))
+        self.assertEqual(image.getpixel((0,0)),(255,255,255))
+        self.assertEqual(image.getpixel((1,1)),(0,0,0))
+    def test_missing_and_size_mismatch(self):
+        (self.baseline/'cam0.png').unlink()
+        Image.new('L',(2,3),255).save(self.actual/'cam1.png')
+        section,data=self.report()
+        self.assertFalse(data['complete']);self.assertTrue(data['changed'])
+        self.assertEqual(data['cameras'][0]['status'],'unknown')
+        self.assertEqual(data['cameras'][1]['status'],'shape_changed')
+    def test_legacy_source_and_snapshot_priority(self):
+        import shutil
+        external=Path(self.tmp.name)/'basalt'
+        external.mkdir();shutil.copytree(self.baseline,external/'masks')
+        self.man['parameters']['basalt_run']=str(external)
+        (self.run/'01_preparation/inputs/basalt_manifest.yaml').write_text(yaml.safe_dump({'camera_masks':{'enabled':True,'directory':'masks'}}))
+        Image.new('L',(4,3),255).save(external/'masks/cam0.png')
+        data=compare_masks(self.run,self.man,{},[])
+        self.assertFalse(data['changed'])
+        shutil.rmtree(self.baseline)
+        sources={};data=compare_masks(self.run,self.man,sources,[])
+        self.assertTrue(data['changed']);self.assertIn('当前内容',data['origin'])
+        self.assertIn(str(external/'masks/cam0.png'),sources)
 
 class DataImport(unittest.TestCase):
     def setUp(self):
