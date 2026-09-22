@@ -130,6 +130,20 @@ int Frame::detect()
   OKVIS_ASSERT_TRUE_DBG(Exception, detector_ != nullptr,
                         "Detector not initialised!")
   detector_->detect(image_, keypoints_);
+  // The bundled ScaleSpaceFeatureDetector rejects nonempty mask arguments.
+  // Apply the geometry mask before descriptor computation and matching.
+  if (!cameraGeometry_->mask().empty()) {
+    std::vector<cv::KeyPoint> valid;
+    valid.reserve(keypoints_.size());
+    for (const auto& keypoint : keypoints_) {
+      const int x = int(keypoint.pt.x);
+      const int y = int(keypoint.pt.y);
+      const auto& mask = cameraGeometry_->mask();
+      if (x >= 0 && y >= 0 && x < mask.cols && y < mask.rows && mask.at<uchar>(y, x) != 0)
+        valid.push_back(keypoint);
+    }
+    keypoints_.swap(valid);
+  }
   return int(keypoints_.size());
 }
 

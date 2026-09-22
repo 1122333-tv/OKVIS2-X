@@ -70,13 +70,13 @@ bool CameraBase::isMasked(const Eigen::Vector2d& imagePoint) const
   if (!hasMask()) {
     return false;
   }
-  return mask_.at<uchar>(int(imagePoint[1]), int(imagePoint[0]));
+  return mask_.at<uchar>(int(imagePoint[1]), int(imagePoint[0])) == 0;
 }
 
 // Check if the keypoint is in the image.
 bool CameraBase::isInImage(const Eigen::Vector2d& imagePoint) const
 {
-  if (imagePoint[0] < 0.0 || imagePoint[1] < 0.0) {
+  if (!imagePoint.allFinite() || imagePoint[0] < 0.0 || imagePoint[1] < 0.0) {
     return false;
   }
   if (imagePoint[0] >= imageWidth_ || imagePoint[1] >= imageHeight_) {

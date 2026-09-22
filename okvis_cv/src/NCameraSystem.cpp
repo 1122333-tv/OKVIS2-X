@@ -60,11 +60,15 @@ void NCameraSystem::computeOverlaps()
         const okvis::kinematics::Transformation T_Cother_C =
             T_SC_[cameraIndexSeenBy]->inverse() * (*T_SC_[cameraIndex]);
         bool hasOverlap = false;
+        overlaps_[cameraIndexSeenBy][cameraIndex] = false;
         for (size_t u = 0; u < width; ++u) {
           for (size_t v = 0; v < height; ++v) {
             // backproject
             Eigen::Vector3d ray_C;
-            camera->backProject(Eigen::Vector2d(double(u), double(v)), &ray_C);
+            if (!camera->mask().empty() && camera->mask().at<uchar>(int(v), int(u)) == 0)
+              continue;
+            if (!camera->backProject(Eigen::Vector2d(double(u), double(v)), &ray_C) || !ray_C.allFinite())
+              continue;
             // project into other camera
             Eigen::Vector3d ray_Cother = T_Cother_C.C() * ray_C;
             // points at infinity, i.e. we only do rotation

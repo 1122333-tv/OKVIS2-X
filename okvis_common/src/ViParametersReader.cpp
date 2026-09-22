@@ -28,6 +28,7 @@
 #include <okvis/cameras/EucmCamera.hpp>
 
 #include <opencv2/core/core.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 #include <okvis/ViParametersReader.hpp>
 
@@ -125,7 +126,7 @@ void ViParametersReader::readConfigFile(const std::string& filename) {
       viParameters_.nCameraSystem.addCamera(
               T_SC_okvis_ptr,
               std::static_pointer_cast<const okvis::cameras::CameraBase>(cam),
-              okvis::cameras::NCameraSystem::NoDistortion, true,
+              okvis::cameras::NCameraSystem::NoDistortion, false,
               calibrations[i].cameraType);
       std::stringstream s;
       s << calibrations[i].T_SC.T();
@@ -152,7 +153,7 @@ void ViParametersReader::readConfigFile(const std::string& filename) {
       viParameters_.nCameraSystem.addCamera(
           T_SC_okvis_ptr,
           std::static_pointer_cast<const cameras::CameraBase>(cam),
-          cameras::NCameraSystem::Equidistant, true,
+          cameras::NCameraSystem::Equidistant, false,
           calibrations[i].cameraType);
       std::stringstream s;
       s << calibrations[i].T_SC.T();
@@ -179,7 +180,7 @@ void ViParametersReader::readConfigFile(const std::string& filename) {
       viParameters_.nCameraSystem.addCamera(
           T_SC_okvis_ptr,
           std::static_pointer_cast<const cameras::CameraBase>(cam),
-          cameras::NCameraSystem::RadialTangential, true,
+          cameras::NCameraSystem::RadialTangential, false,
           calibrations[i].cameraType);
       std::stringstream s;
       s << calibrations[i].T_SC.T();
@@ -209,7 +210,7 @@ void ViParametersReader::readConfigFile(const std::string& filename) {
       viParameters_.nCameraSystem.addCamera(
           T_SC_okvis_ptr,
           std::static_pointer_cast<const cameras::CameraBase>(cam),
-          cameras::NCameraSystem::RadialTangential8, true,
+          cameras::NCameraSystem::RadialTangential8, false,
           calibrations[i].cameraType);
       std::stringstream s;
       s << calibrations[i].T_SC.T();
@@ -218,8 +219,22 @@ void ViParametersReader::readConfigFile(const std::string& filename) {
     } else {
       LOG(ERROR) << "unrecognized distortion type " << calibrations[i].distortionType;
     }
+    // PNG masks use OpenCV convention: zero excluded, nonzero valid.
+    const cv::FileNode maskNode = file["cameras"][int(i)]["mask_file"];
+    if (maskNode.isString()) {
+      const std::string maskPath = std::string(maskNode);
+      cv::Mat mask = cv::imread(maskPath, cv::IMREAD_GRAYSCALE);
+      auto camera = std::const_pointer_cast<cameras::CameraBase>(
+          viParameters_.nCameraSystem.cameraGeometry(i));
+      OKVIS_ASSERT_TRUE(Exception, !mask.empty() && camera->setMask(mask),
+                        "Invalid camera mask: " << maskPath);
+      LOG(INFO) << "Camera " << i << " mask valid pixels: " << cv::countNonZero(mask);
+    }
     ++camIdx;
   }
+
+  // Compute only after every camera mask has been installed.
+  viParameters_.nCameraSystem.computeOverlaps();
 
   if(file["lidar"].isMap()){
     viParameters_.lidar = okvis::LidarParameters(); 

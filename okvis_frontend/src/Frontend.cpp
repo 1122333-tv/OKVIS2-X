@@ -18,6 +18,7 @@
  */
 
 #include "okvis/assert_macros.hpp"
+#include <cstdlib>
 #include <opencv2/imgcodecs.hpp>
 #include <pthread.h>
 #include <sched.h>
@@ -248,6 +249,22 @@ bool Frontend::detectAndDescribe(size_t cameraIndex, std::shared_ptr<okvis::Mult
 
   // extract
   frameOut->describe(cameraIndex);
+
+  if (std::getenv("OKVIS_FEATURE_AUDIT") != nullptr) {
+    const auto& mask = frameOut->geometry(cameraIndex)->mask();
+    size_t excluded = 0;
+    for (size_t k = 0; k < frameOut->numKeypoints(cameraIndex); ++k) {
+      Eigen::Vector2d uv;
+      frameOut->getKeypoint(cameraIndex, k, uv);
+      if (!mask.empty() && (uv[0] < 0 || uv[1] < 0 || uv[0] >= mask.cols || uv[1] >= mask.rows ||
+          mask.at<uchar>(int(uv[1]), int(uv[0])) == 0)) ++excluded;
+    }
+    LOG(INFO) << "FEATURE_AUDIT camera=" << cameraIndex
+              << " timestamp_ns=" << frameOut->timestamp().toNSec()
+              << " features=" << frameOut->numKeypoints(cameraIndex)
+              << " excluded=" << excluded;
+    OKVIS_ASSERT_TRUE(Exception, excluded == 0, "Excluded keypoint survived mask filtering");
+  }
 
   // precompute backprojections
   frameOut->computeBackProjections(cameraIndex);
