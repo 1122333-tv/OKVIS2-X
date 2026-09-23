@@ -40,6 +40,7 @@
 #include <boost/filesystem.hpp>
 
 #include <execinfo.h>
+#include "CameraDisplay.hpp"
 
 
 /// \brief Main
@@ -158,16 +159,33 @@ int main(int argc, char **argv)
   okvis::Time startTime = okvis::Time::now();
   datasetReader->startStreaming();
   int progress = 0;
+  bool cameraWindowCreated = false;
+  bool topViewWindowCreated = false;
   while (true) {
     estimator.processFrame();
     std::map<std::string, cv::Mat> images;
     estimator.display(images);
-    for(const auto & image : images) {
-      cv::imshow(image.first, image.second);
+    if (!images.empty()) {
+      const cv::Mat grid = cameraDisplayGrid(images, parameters.nCameraSystem.numCameras());
+      if (!grid.empty()) {
+        if (!cameraWindowCreated) {
+          cv::namedWindow("OKVIS 2 Cameras", cv::WINDOW_NORMAL | cv::WINDOW_KEEPRATIO);
+          const double scale = std::min(1.0, std::min(1280.0 / grid.cols, 850.0 / grid.rows));
+          cv::resizeWindow("OKVIS 2 Cameras", cvRound(grid.cols * scale),
+                           cvRound(grid.rows * scale));
+          cameraWindowCreated = true;
+        }
+        cv::imshow("OKVIS 2 Cameras", grid);
+      }
     }
     cv::Mat topView;
     writer.drawTopView(topView);
     if(!topView.empty()) {
+      if (!topViewWindowCreated) {
+        cv::namedWindow("OKVIS 2 Top View", cv::WINDOW_NORMAL | cv::WINDOW_KEEPRATIO);
+        cv::resizeWindow("OKVIS 2 Top View", 500, 500);
+        topViewWindowCreated = true;
+      }
       cv::imshow("OKVIS 2 Top View", topView);
     }
     if(!images.empty() || !topView.empty()) {
