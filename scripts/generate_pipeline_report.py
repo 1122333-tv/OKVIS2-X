@@ -15,6 +15,34 @@ from PIL import Image
 from pipeline_layout import read_manifest, artifact, sha, dump
 
 
+# Styling follows the Basalt pipeline report; kept local for standalone generation.
+CSS = """
+:root{color-scheme:light;--ink:#172b3a;--muted:#526977;--line:#d8e2e8;--accent:#006a72}
+*{box-sizing:border-box}body{margin:0;background:#f2f5f7;color:var(--ink);font:15px/1.65 system-ui,"Noto Sans CJK SC",sans-serif}
+header{background:#153c4b;color:white;padding:38px max(30px,calc((100vw - 1400px)/2));overflow-wrap:anywhere}
+.eyebrow{font-size:12px;letter-spacing:.18em;color:#aedfe0}h1{font-size:32px;margin:10px 0}h2{font-size:23px;margin:0 0 20px}h3{margin-top:25px}
+.cards{display:flex;gap:15px;flex-wrap:wrap;margin-top:24px}.cards>div{background:#245061;padding:14px 24px;min-width:170px;border-radius:8px}.cards small,.cards strong{display:block}.cards strong{font-size:28px}
+.layout{max-width:1450px;margin:auto;display:grid;grid-template-columns:210px minmax(0,1fr);gap:28px;padding:28px}
+nav{position:sticky;top:20px;align-self:start}nav a{display:block;padding:9px 12px;border-radius:5px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+section{background:white;border:1px solid var(--line);border-radius:10px;padding:28px;margin-bottom:22px;scroll-margin-top:20px;overflow-wrap:anywhere}
+.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px;margin:12px 0}th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;max-width:520px;overflow-wrap:anywhere}
+th{background:#eaf2f4;font-weight:650}tr:hover td{background:#f7fafb}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f6f7;padding:14px;font-size:12px}
+details{margin:14px 0}summary{cursor:pointer;color:var(--accent);font-weight:600}input{padding:9px;border:1px solid #8aadb8;border-radius:5px;font:inherit;width:min(450px,100%)}
+.note{background:#fff6df;padding:12px 16px;border-left:3px solid #c18a21}.gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+figure{margin:10px 0;border:1px solid var(--line);padding:10px;border-radius:6px}figure img{width:100%;height:auto}figcaption{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+button{cursor:pointer;border:1px solid var(--line);border-radius:5px;padding:8px 12px;background:white;color:var(--accent)}button.zoom{padding:0;border:0;width:100%}
+.masks{display:flex;gap:12px;flex-wrap:wrap}.masks figure{width:170px}dialog{max-width:96vw;max-height:96vh;padding:12px;border:0;border-radius:8px}dialog img{display:block;max-width:90vw;max-height:85vh;object-fit:contain}dialog::backdrop{background:#102530bb}
+@media(max-width:850px){.layout{display:block;padding:12px}nav{position:static;display:flex;flex-wrap:wrap;margin-bottom:16px}section{padding:18px}.gallery{grid-template-columns:1fr}}
+@media print{body{background:white;font-size:10pt}header{background:white;color:black;padding:0}.cards>div{background:#eef4f5}nav,button,#config-search{display:none!important}button.zoom{display:block!important}.layout{display:block;padding:0}section{border:0;border-radius:0;padding:12px 0;break-before:auto}figure,tr{break-inside:avoid}.gallery{display:block}.scroll{overflow:visible}table{font-size:8pt}a{color:black}dialog{display:none}}
+
+main{min-width:0}.table-scroll{overflow-x:auto}.metrics{white-space:nowrap}.metrics td,.metrics th{overflow-wrap:normal}
+.plots{table-layout:fixed;min-width:760px}.plots figure{margin:0}.plots th:first-child{width:14%}
+.file-path{font-size:12px;color:var(--muted)}.file-block{margin:18px 0}pre{max-height:420px;overflow:auto}
+.mask-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;min-width:760px}.mask-grid figure{margin:8px 0;padding:6px}.mask-grid p{font-size:12px}
+button.zoom{cursor:zoom-in}.cards strong{overflow-wrap:anywhere}nav a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media print{pre{max-height:none;overflow:visible}.table-scroll{overflow:visible}.plots,.mask-grid{min-width:0}.metrics{white-space:normal}.mask-grid{gap:6px}.cards strong{font-size:18pt}.eyebrow{color:var(--muted)}}
+"""
+
 def differences(a,b,prefix=''):
     if isinstance(a,dict) and isinstance(b,dict):
         out=[]
@@ -208,15 +236,19 @@ def generate(run, automatic=False):
         if isinstance(v,dict):return {k:safe(x) for k,x in v.items()}
         if isinstance(v,list):return [safe(x) for x in v]
         return v
-    page='''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OKVIS VIO 评测报告</title>
-<style>body{max-width:1200px;margin:32px auto;padding:0 24px;font:16px/1.65 system-ui;color:#202b36;background:#fafbfc}nav{display:flex;gap:18px;flex-wrap:wrap}a{color:#155c9c}section{margin:30px 0;padding:22px;background:white;border:1px solid #dbe2e8;border-radius:10px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{border:1px solid #dbe2e8;padding:8px;text-align:left;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-height:420px;overflow:auto}img{max-width:100%}.zoom{background:none;border:0;cursor:zoom-in;width:100%}figure{margin:20px 0}figcaption{font-size:12px;overflow-wrap:anywhere}.file-path{overflow-wrap:anywhere;font-size:13px}.file-block{margin:18px 0}dialog{max-width:95vw;max-height:95vh;padding:12px}dialog img{max-height:85vh}button{padding:8px} @media print{nav,input,dialog{display:none}pre{max-height:none;overflow:visible}section{break-inside:auto}figure{break-inside:avoid}}</style>
-<style>.table-scroll{overflow-x:auto}.metrics{white-space:nowrap}.metrics td,.metrics th{overflow-wrap:normal}.plots{table-layout:fixed;min-width:760px}.plots td{vertical-align:top}.plots figure{margin:0}.plots .zoom{padding:0}summary{cursor:pointer;font-weight:600}details{margin:14px 0}body{max-width:1560px}</style>
-<h1>OKVIS VIO 评测报告</h1>'''
-    page+='<style>.mask-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;min-width:760px}.mask-grid figure{margin:8px 0}.mask-grid .zoom{padding:0}</style>'
-    page+='<nav>'+''.join('<a href="#'+id+'">'+e(title)+'</a>' for id,title,_ in sections)+'</nav>'+''.join(body for _,_,body in sections)
-    page+='''<dialog id="viewer"><button id="close">关闭</button><img id="large" alt="放大的评测图"></dialog><script>
-const viewer=document.getElementById('viewer');document.querySelectorAll('.zoom').forEach(b=>b.onclick=()=>{document.getElementById('large').src=b.querySelector('img').src;viewer.showModal()});document.getElementById('close').onclick=()=>viewer.close();window.addEventListener('beforeprint',()=>document.querySelectorAll('details').forEach(d=>d.open=true));
-</script></html>'''
+    status_labels={'complete':'已完成','failed':'失败','running':'运行中'}
+    cards=[('运行状态',status_labels.get(m['status'],m['status'])),
+           ('VIO 位姿',vio.get('poses','—')),
+           ('共同时间戳',comp.get('common_timestamps',{}).get('n','—')),
+           ('变化掩膜',sum(r['changed'] is True for r in masks['cameras']) if masks['complete'] else '未完整核对')]
+    page='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+e(run.name)+' · OKVIS VIO 评测报告</title><style>'+CSS+'</style></head><body>'
+    page+='<header><div class="eyebrow">OKVIS2 · OFFLINE PIPELINE</div><h1>视觉惯性管线报告</h1><p>OKVIS2 / Basalt · VIO 评测</p><p>'+e(run.name)+'</p><div class="cards">'+''.join('<div><small>'+e(k)+'</small><strong>'+e(v)+'</strong></div>' for k,v in cards)+'</div></header>'
+    page+='<div class="layout"><nav aria-label="报告章节">'+''.join('<a href="#'+id+'">'+e(title)+'</a>' for id,title,_ in sections)+'<button type="button" onclick="window.print()">打印报告</button></nav><main>'+''.join(body for _,_,body in sections)+'</main></div>'
+    page+='''<dialog id="viewer" aria-label="图表放大"><button id="close" type="button">关闭</button><img id="large" alt="放大的评测图"></dialog><script>
+const viewer=document.getElementById('viewer');document.querySelectorAll('.zoom').forEach(b=>b.onclick=()=>{const source=b.querySelector('img');const large=document.getElementById('large');large.src=source.src;large.alt=source.alt;viewer.showModal()});document.getElementById('close').onclick=()=>viewer.close();
+window.addEventListener('beforeprint',()=>document.querySelectorAll('details').forEach(d=>{d.dataset.wasOpen=String(d.open);d.open=true}));
+window.addEventListener('afterprint',()=>document.querySelectorAll('details').forEach(d=>d.open=d.dataset.wasOpen==='true'));
+</script></body></html>'''
     target=run/'report';target.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=target,prefix='.generate-') as tmp:
         tmp=Path(tmp)
