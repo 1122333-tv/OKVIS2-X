@@ -32,6 +32,12 @@ class Reproducibility(unittest.TestCase):
             with self.assertRaises(ValueError):read_states(self.file('a',v))
         with self.assertRaises(ValueError):read_states(self.file('a',stamps=(1,1)))
         with self.assertRaises(ValueError):compare_group([self.file('a')])
+    def test_opencv_yaml_writer(self):
+        from run_vio_reproducibility import write_yaml
+        path=self.root/'config.yaml'
+        write_yaml(path,{'camera_parameters':{'sync_cameras':[0,1,2,3]}})
+        self.assertIn('sync_cameras: [0, 1, 2, 3]',path.read_text())
+        self.assertTrue(path.read_text().startswith('%YAML:1.0\n---\n'))
     def test_profiles_only_change_authorized_keys(self):
         cfg={'cameras':[{}]*4,'estimator_parameters':{'realtime_num_threads':3,'enforce_realtime':False,'do_loop_closures':False,'do_final_ba':False},'frontend_parameters':{'parallelise_detection':True,'num_matching_threads':4}}
         original=copy.deepcopy(cfg);solver=profile_config(cfg,'solver-single')

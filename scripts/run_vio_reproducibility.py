@@ -16,6 +16,7 @@ import uuid
 import yaml
 from compare_vio_states import read_states, compare_group
 from pipeline_layout import sha, dump
+from convert_rig_to_okvis import write_yaml
 
 PROFILES={'solver-single': {'estimator_parameters.realtime_num_threads':1},
           'frontend-single': {'estimator_parameters.realtime_num_threads':1,
@@ -72,7 +73,7 @@ def main():
         for repeat in range(1,a.repeats+1):
             run=out/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+profile+f'_{repeat}_'+uuid.uuid4().hex[:6])
             run.mkdir();(run/'outputs').mkdir()
-            config=run/'config.yaml';config.write_text('%YAML:1.0\n'+yaml.safe_dump(profile_config(cfg,profile),sort_keys=False))
+            config=run/'config.yaml';write_yaml(config,profile_config(cfg,profile))
             command=[str(binary),str(config),str(base/'01_preparation/outputs/dataset/mav0'),str(run/'outputs'),'--deterministic','1']
             manifest=dict(profile=profile,repeat=repeat,sampling={'deterministic':True,'seed':12345},command=command,binary_sha256=sha(binary),config_sha256=sha(config),status='running',baseline=str(base))
             dump(run/'manifest.json',manifest);print('START',run,flush=True);start=time.monotonic()
