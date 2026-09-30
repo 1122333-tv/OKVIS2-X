@@ -1099,6 +1099,15 @@ bool Frontend::dataAssociationAndInitialization(
     break;
   } //ToDo:EUCM
 
+  if (std::getenv("OKVIS_VIO_DIAGNOSTICS")) {
+    LOG(INFO) << "VIO_FRONTEND timestamp_ns=" << framesInOut->timestamp().toNSec()
+              << " map_matches=" << num3dMatches
+              << " map_tracking_quality=" << trackingQuality
+              << " initialized=" << isInitialized_
+              << " tracking_lost=" << trackingLost_
+              << " keyframe=" << *asKeyframe;
+  }
+
 #ifdef OKVIS_USE_NN
   if(params.frontend.use_cnn) {
     // remove matches into dynamic areas
@@ -1326,6 +1335,7 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
   std::vector<cv::Mat> descriptorPool(params.nCameraSystem.numCameras());
   kinematics::Transformation T_WS1 = estimator.pose(StateId(currentFrameId));
   double reprErr = 0.0;
+  size_t emptyMatchPartitions = 0;
   for (size_t im = 0; im < params.nCameraSystem.numCameras(); ++im) {
 
     // the current frame to match
@@ -1517,6 +1527,7 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
       threads[t]->join();
       delete threads[t];
       reprErr += reprErrors[t];
+      emptyMatchPartitions += ctrs[t] == 0;
     }
 
     // now insert observations
@@ -1561,6 +1572,12 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
     numInitIter += 2;
   }
   bool secondRansac = false;
+  if (std::getenv("OKVIS_VIO_DIAGNOSTICS")) {
+    LOG(INFO) << "VIO_MATCH timestamp_ns=" << multiFrame->timestamp().toNSec()
+              << " matches=" << ctr << " mean_reprojection=" << reprErr
+              << " empty_partitions=" << emptyMatchPartitions
+              << " ransac=" << runRansac;
+  }
   if(runRansac) {
     const bool ransacSuccess = runRansac3d2d(estimator, multiFrame->cameraSystem(), multiFrame,
                                              runRansac, ransacRemoveOutliers);
@@ -2386,6 +2403,7 @@ int Frontend::removeOutliers(Estimator &estimator,
     const kinematics::Transformation T_SC = *currentFrame->T_SC(im);
     const kinematics::Transformation T_WCi = T_WS * T_SC;
     const kinematics::Transformation T_CiW = T_WCi.inverse();
+    size_t kept = 0, rejected = 0, invalid = 0;
     const size_t kSize = currentFrame->numKeypoints(im);
     for (size_t k = 0; k < kSize; ++k) {
       uint64_t lmId = currentFrame->landmarkId(im, k);
@@ -2406,15 +2424,23 @@ int Frontend::removeOutliers(Estimator &estimator,
               }
             } else {
               remove = true;
+              ++invalid;
             }
             if (!remove) {
               ctr++;
+              ++kept;
             } else {
+              ++rejected;
               estimator.removeObservation(StateId(mfId), im, k);
             }
           }
         }
       }
+    }
+    if (std::getenv("OKVIS_VIO_DIAGNOSTICS")) {
+      LOG(INFO) << "VIO_REJECTION timestamp_ns=" << currentFrame->timestamp().toNSec()
+                << " camera=" << im << " kept=" << kept
+                << " rejected=" << rejected << " invalid_projection=" << invalid;
     }
   }
   return ctr;
@@ -2454,6 +2480,11 @@ bool Frontend::runRansac3d2d(
   // run the ransac
   ransac.computeModel(0);
 
+  if (std::getenv("OKVIS_VIO_DIAGNOSTICS")) {
+    LOG(INFO) << "VIO_RANSAC timestamp_ns=" << currentFrame->timestamp().toNSec()
+              << " correspondences=" << numCorrespondences
+              << " inliers=" << ransac.inliers_.size();
+  }
   // deal with outliers and assign transformation
   numInliers = int(ransac.inliers_.size());
   if (numInliers >= 10 && double(ransac.inliers_.size())/double(numCorrespondences)>0.7) {

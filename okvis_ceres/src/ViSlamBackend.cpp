@@ -21,6 +21,8 @@
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#include <cstdlib>
+#include <sstream>
 
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/imgcodecs/imgcodecs.hpp>
@@ -876,6 +878,102 @@ void ViSlamBackend::optimiseRealtimeGraph(
   // run the optimiser
   realtimeGraph_.options_.linear_solver_type = ::ceres::DENSE_SCHUR;
   realtimeGraph_.optimise(numIter, numThreads, verbose);
+
+  // Opt-in, read-only diagnostics. Residuals are whitened, before robust loss;
+  // never use these measurements to change weights or accept/reject states.
+  if (std::getenv("OKVIS_VIO_DIAGNOSTICS") ) {
+    const auto & latest = realtimeGraph_.states_.rbegin()->second;
+    const auto & summary = realtimeGraph_.summary();
+    size_t initializedLandmarks = 0;
+    std::vector<double> initializedDistances;
+    for (const auto & landmark : realtimeGraph_.landmarks_) {
+      initializedLandmarks += landmark.second.hPoint->initialized();
+      const auto point = landmark.second.hPoint->estimate();
+      if (landmark.second.hPoint->initialized() && std::abs(point[3]) > 1e-12) {
+        initializedDistances.push_back(
+            (point.head<3>()/point[3]-latest.pose->estimate().r()).norm());
+      }
+    }
+    double medianDistance = 0.0;
+    if (!initializedDistances.empty()) {
+      const auto middle = initializedDistances.begin()+initializedDistances.size()/2;
+      std::nth_element(initializedDistances.begin(), middle, initializedDistances.end());
+      medianDistance = *middle;
+    }
+    std::ostringstream row;
+    row << "VIO_SOLVER timestamp_ns=" << latest.timestamp.toNSec()
+        << " only_newest=" << onlyNewestState
+        << " max_iterations=" << numIter
+        << " initialized=" << isInitialised
+        << " keyframe=" << latest.isKeyframe
+        << " states=" << realtimeGraph_.states_.size()
+        << " landmarks=" << realtimeGraph_.landmarks_.size()
+        << " initialized_landmarks=" << initializedLandmarks
+        << " finite_initialized_landmarks=" << initializedDistances.size()
+        << " initialized_distance_median=" << medianDistance
+        << " iterations=" << summary.iterations.size()
+        << " termination=" << int(summary.termination_type)
+        << " initial_cost=" << summary.initial_cost
+        << " final_cost=" << summary.final_cost;
+    double imuSse = 0.0;
+    double imuLossSum = 0.0, latestImuSse = 0.0, latestImuWeight = 1.0;
+    size_t downweightedImuLinks = 0;
+    size_t imuCount = 0;
+    for (const auto & state : realtimeGraph_.states_) {
+      const auto block = state.second.previousImuLink.residualBlockId;
+      if (!block) continue;
+      double residuals[15], cost;
+      if (realtimeGraph_.problem_->EvaluateResidualBlock(block, false, &cost, residuals, nullptr)) {
+        double squaredNorm = 0.0;
+        for (double residual : residuals) squaredNorm += residual * residual;
+        imuSse += squaredNorm;
+        double rho[3] = {squaredNorm, 1.0, 0.0};
+        const auto * loss = realtimeGraph_.problem_->GetLossFunctionForResidualBlock(block);
+        if (loss) loss->Evaluate(squaredNorm, rho);
+        imuLossSum += rho[0];
+        downweightedImuLinks += rho[1] < 0.999;
+        if (state.first == realtimeGraph_.states_.rbegin()->first) {
+          latestImuSse = squaredNorm;
+          latestImuWeight = rho[1];
+        }
+        ++imuCount;
+      }
+    }
+    row << " imu_links=" << imuCount << " imu_sse=" << imuSse
+        << " imu_loss_sum=" << imuLossSum << " downweighted_imu_links=" << downweightedImuLinks
+        << " latest_imu_sse=" << latestImuSse << " latest_imu_weight=" << latestImuWeight;
+    LOG(INFO) << row.str();
+    for (size_t camera = 0; camera < latest.extrinsics.size(); ++camera) {
+      size_t count = 0, crossCamera = 0, temporal = 0, failed = 0;
+      double sse = 0.0, maximum = 0.0;
+      for (const auto & observation : latest.observations) {
+        if (observation.first.cameraIndex != camera) continue;
+        const auto & landmark = realtimeGraph_.landmarks_.at(observation.second.landmarkId);
+        bool cross = false, tracked = false;
+        for (const auto & other : landmark.observations) {
+          cross |= other.first.cameraIndex != camera;
+          tracked |= other.first.frameId != observation.first.frameId;
+        }
+        crossCamera += cross;
+        temporal += tracked;
+        double residuals[2], cost;
+        if (!realtimeGraph_.problem_->EvaluateResidualBlock(
+                observation.second.residualBlockId, false, &cost, residuals, nullptr)) {
+          ++failed;
+          continue;
+        }
+        const double squared = residuals[0]*residuals[0] + residuals[1]*residuals[1];
+        sse += squared;
+        maximum = std::max(maximum, std::sqrt(squared));
+        ++count;
+      }
+      LOG(INFO) << "VIO_CONSTRAINT timestamp_ns=" << latest.timestamp.toNSec()
+                << " camera=" << camera << " observations=" << count
+                << " temporal=" << temporal << " cross_camera=" << crossCamera
+                << " residual_sse=" << sse << " residual_max=" << maximum
+                << " failed=" << failed;
+    }
+  }
 
   // unfreeze if necessary
   if(onlyNewestState) {
