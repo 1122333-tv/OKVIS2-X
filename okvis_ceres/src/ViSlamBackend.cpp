@@ -2374,7 +2374,8 @@ bool ViSlamBackend::writeFinalCsvTrajectory(const std::string &csvFileName, bool
             << "q_WS_z" << ", " << "q_WS_w" << ", " << "v_WS_W_x" << ", "
             << "v_WS_W_y" << ", " << "v_WS_W_z" << ", " << "b_g_x" << ", "
             << "b_g_y" << ", " << "b_g_z" << ", " << "b_a_x" << ", " << "b_a_y"
-            << ", " << "b_a_z" << ", " << "NrGps" << ", " << "SID" << ", " << "gpsMode" << std::endl;
+            << ", " << "b_a_z" << ", " << "NrGps" << ", " << "SID" << ", " << "gpsMode"
+            << ", " << "keyframeId" << std::endl;
   }
   for (auto iter = realtimeGraph_.anyState_.begin(); iter != realtimeGraph_.anyState_.end(); ++iter) {
     Eigen::Vector3d p_WS_W;

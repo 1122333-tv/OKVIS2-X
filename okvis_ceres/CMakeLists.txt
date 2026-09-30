@@ -102,6 +102,8 @@ add_library(okvis::Ceres ALIAS ${LIB_NAME})
 # Focused standalone regression, also available in the offline VIO build without gtest.
 add_executable(okvis_imu_robust_loss_test EXCLUDE_FROM_ALL test/TestImuRobustLossStandalone.cpp)
 target_link_libraries(okvis_imu_robust_loss_test PRIVATE ${LIB_NAME})
+add_executable(okvis_final_csv_test EXCLUDE_FROM_ALL test/TestFinalCsvStandalone.cpp)
+target_link_libraries(okvis_final_csv_test PRIVATE ${LIB_NAME})
 
 install(TARGETS ${LIB_NAME} EXPORT okvisTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

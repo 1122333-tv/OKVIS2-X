@@ -808,7 +808,7 @@ protected:
     std::vector<::ceres::ResidualBlockId> mapResIds;
     std::vector<SubmapAlignmentFactor> submapReferenceLinks;
     std::vector<SubmapAlignmentFactor> submapLinks;
-    size_t gpsMode; ///< Status of GPS (Re-)Initialization.
+    size_t gpsMode = gpsStatus::Off; ///< Status of GPS (Re-)Initialization; defined in pure VIO too.
 
     // attributes
     bool isKeyframe = false; ///< Is it a keyframe?
