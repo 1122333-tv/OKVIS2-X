@@ -43,6 +43,19 @@ def run_owned_process(command, cwd, env, log, cancel_file):
                 os.killpg(process.pid,signal.SIGKILL);process.wait()
 
 
+def validate_isolation(original_path, modified_path):
+    import csv
+    original_lines=original_path.read_bytes().splitlines()
+    modified_lines=modified_path.read_bytes().splitlines()
+    if not original_lines or not modified_lines or original_lines[0]!=modified_lines[0]:
+        raise ValueError('Isolation must preserve the IMU header consumed by DatasetReader')
+    def rows(lines):
+        return list(csv.reader(l.decode() for l in lines if l and not l.startswith(b'#')))
+    original=rows(original_lines);modified=rows(modified_lines)
+    if len(original)!=len(modified) or any(x[0]!=y[0] or x[4:]!=y[4:] for x,y in zip(original,modified)):
+        raise ValueError('Isolation must preserve all timestamps and accelerometer samples')
+
+
 def main():
     p=argparse.ArgumentParser(__doc__)
     p.add_argument('--baseline',required=True,type=Path)
@@ -73,6 +86,7 @@ def main():
     for change in a.set:
         key,value=change.split('=',1); section,field=key.split('.')
         if key=='imu_parameters.huber_loss_scale':cfg[section].setdefault(field,0.0)
+        if key=='frontend_parameters.visual_recovery':cfg[section].setdefault(field,False)
         old=cfg[section][field]; cfg[section][field]=json.loads(value)
         changes[key]={'old':old,'new':cfg[section][field]}
     if any(cfg['estimator_parameters'][k] for k in ('do_loop_closures','do_final_ba','enforce_realtime')):
@@ -85,12 +99,7 @@ def main():
     data=(base/'01_preparation/outputs/dataset/mav0').resolve()
     original_data=data
     if a.diagnostic_imu_csv:
-        import csv
-        def imu_rows(path):
-            return list(csv.reader(l for l in path.read_text().splitlines() if l and not l.startswith('#')))
-        original=imu_rows(data/'imu0/data.csv');modified=imu_rows(a.diagnostic_imu_csv)
-        if len(original)!=len(modified) or any(x[0]!=y[0] or x[4:]!=y[4:] for x,y in zip(original,modified)):
-            raise ValueError('Isolation must preserve all timestamps and accelerometer samples')
+        validate_isolation(original_data/'imu0/data.csv',a.diagnostic_imu_csv)
         data=run/'diagnostic_dataset/mav0';data.mkdir(parents=True)
         for i in range(4):(data/f'cam{i}').symlink_to(original_data/f'cam{i}')
         (data/'imu0').mkdir();shutil.copy2(a.diagnostic_imu_csv,data/'imu0/data.csv')
@@ -101,7 +110,7 @@ def main():
     if a.diagnostics:env['OKVIS_VIO_DIAGNOSTICS']='1'
     command=[str(binary),str(config),str(data),str(outputs),'--deterministic','1']
     root=Path(__file__).resolve().parents[1]
-    meta=dict(runtime_libraries=libraries,parent=a.parent,sampling={'deterministic':True,'seed':12345},input_hashes_sha256=sha(a.input_hashes),status='running',baseline=str(base),changes=changes,diagnostics=a.diagnostics,
+    meta=dict(environment={k:env.get(k) for k in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','OKVIS_FEATURE_AUDIT','OKVIS_VIO_DIAGNOSTICS','OKVIS_REPRO_AUDIT')},runtime_libraries=libraries,parent=a.parent,sampling={'deterministic':True,'seed':12345},input_hashes_sha256=sha(a.input_hashes),status='running',baseline=str(base),changes=changes,diagnostics=a.diagnostics,
               diagnostic_input_only=bool(a.diagnostic_imu_csv),original_imu_sha256=sha(original_data/'imu0/data.csv'),
               command=command,binary_sha256=sha(binary),config_sha256=sha(config),
               input_indices={str(x):sha(data/x/'data.csv') for x in ['imu0','cam0','cam1','cam2','cam3']},

@@ -64,6 +64,31 @@ class DriftMetricsTest(unittest.TestCase):
             self.assertEqual(rows[0]['time_s'],17e-9)
             self.assertEqual(rows[0]['b_a_z'],6.)
 
+    def test_isolation_preserves_header_and_unmodified_bytes(self):
+        from make_gyro_isolation_input import isolate
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);source=root/'imu.csv'
+            lines=[b'#timestamp,wx,wy,wz,ax,ay,az\r\n']
+            lines += [f'{100+i},0,0,{10 if i==10 else 0},1,2,3\r\n'.encode() for i in range(21)]
+            source.write_bytes(b''.join(lines));meta=isolate(source,root/'out')
+            actual=(root/'out/data.csv').read_bytes().splitlines(keepends=True)
+            self.assertEqual(len(actual),len(lines))
+            self.assertEqual([c['row'] for c in meta['changes']],[10])
+            for i in range(len(lines)):
+                if i!=11:self.assertEqual(actual[i],lines[i])
+            self.assertEqual(actual[11],b'110,0,0,0,1,2,3\r\n')
+            self.assertEqual(source.read_bytes(),b''.join(lines))
+
+    def test_isolation_rejects_missing_header(self):
+        from run_vio_drift_experiment import validate_isolation
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);a=root/'a';b=root/'b'
+            a.write_text('#header\n1,0,0,0,1,2,3\n');b.write_text('1,0,0,0,1,2,3\n')
+            with self.assertRaisesRegex(ValueError,'header'):validate_isolation(a,b)
+            b.write_text('#header\n1,4,0,0,1,2,3\n');validate_isolation(a,b)
+            b.write_text('#header\n1,4,0,0,1,2,4\n')
+            with self.assertRaisesRegex(ValueError,'accelerometer'):validate_isolation(a,b)
+
     def test_rotation_units_degrees(self):
         ref=self.trajectory([[0,0,0],[0,0,0]])
         q=Rotation.from_euler('z',[[0],[10]],degrees=True).as_quat()[:,[3,0,1,2]]

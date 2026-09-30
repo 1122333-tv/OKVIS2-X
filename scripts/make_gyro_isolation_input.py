@@ -13,12 +13,11 @@ import numpy as np
 from scipy.ndimage import median_filter
 
 
-def main():
-    p=argparse.ArgumentParser(__doc__);p.add_argument('--input',type=Path,required=True)
-    p.add_argument('--output',type=Path,required=True);a=p.parse_args()
-    a.output.mkdir(parents=True,exist_ok=False)
-    lines=a.input.read_text().splitlines()
-    rows=list(csv.reader(l for l in lines if l and not l.startswith('#')))
+def isolate(input_path, output):
+    output.mkdir(parents=True,exist_ok=False)
+    raw_lines=input_path.read_bytes().splitlines(keepends=True)
+    indices=[i for i,line in enumerate(raw_lines) if line.strip() and not line.startswith(b'#')]
+    rows=list(csv.reader(raw_lines[i].decode().strip() for i in indices))
     gyro=np.array([[float(v) for v in row[1:4]] for row in rows])
     median=median_filter(gyro,size=(11,1),mode='nearest')
     mad=median_filter(abs(gyro-median),size=(11,1),mode='nearest')
@@ -29,13 +28,25 @@ def main():
         for axis in range(3):
             if flags[i,axis]:rows[i][axis+1]=format(median[i,axis],'.17g')
         changes.append(dict(row=int(i),timestamp_ns=int(rows[i][0]),before=before,after=rows[i][1:4]))
-    with (a.output/'data.csv').open('w') as f:csv.writer(f).writerows(rows)
+    result=raw_lines.copy()
+    for change in changes:
+        i=change['row'];line_index=indices[i]
+        original=raw_lines[line_index]
+        ending=original[len(original.rstrip(b'\r\n')):]
+        result[line_index]=','.join(rows[i]).encode()+ending
+    (output/'data.csv').write_bytes(b''.join(result))
     meta=dict(purpose='diagnostic_only_not_final_fix',uses_gt=False,causal_filter=False,
-              input=str(a.input.resolve()),input_sha256=hashlib.sha256(a.input.read_bytes()).hexdigest(),
-              output_sha256=hashlib.sha256((a.output/'data.csv').read_bytes()).hexdigest(),
+              input=str(input_path.resolve()),input_sha256=hashlib.sha256(input_path.read_bytes()).hexdigest(),
+              output_sha256=hashlib.sha256((output/'data.csv').read_bytes()).hexdigest(),
               window_samples=11,min_deviation_rad_s=.5,mad_multiplier=6*1.4826,changes=changes)
-    (a.output/'changes.json').write_text(json.dumps(meta,indent=2)+'\n')
-    print(f'Flagged {len(changes)} rows; timestamps and accelerometer unchanged.')
+    (output/'changes.json').write_text(json.dumps(meta,indent=2)+'\n')
+    return meta
 
+
+def main():
+    p=argparse.ArgumentParser(__doc__);p.add_argument('--input',type=Path,required=True)
+    p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+    meta=isolate(a.input,a.output)
+    print(f"Flagged {len(meta['changes'])} rows; header, timestamps and accelerometer unchanged.")
 
 if __name__=='__main__':main()
