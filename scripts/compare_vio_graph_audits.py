@@ -45,6 +45,7 @@ def compare_audits(a, b):
             if key not in result['first_differences'] and x[key] != y[key]:
                 result['first_differences'][key] = dict(timestamp_ns=x['timestamp_ns'], time_s=(x['timestamp_ns']-left[0]['timestamp_ns'])/1e9,
                     solve_index=x['solve_index'], phase=x['phase'], iterations=int(x['iterations']), a=x[key], b=y[key])
+    result['parameter_order_note'] = 'GetParameterBlocks address-ordered enumeration; not the internal solver program order'
     result['fingerprints_equal'] = result['structure_aligned'] and not result['first_differences']
     return result
 
