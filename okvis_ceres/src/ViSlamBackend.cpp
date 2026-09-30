@@ -875,6 +875,29 @@ void ViSlamBackend::optimiseRealtimeGraph(
 
 
 
+  // IMU evaluation can update preintegration caches. Diagnostics must evaluate
+  // a clone, so observing a rejected solver step cannot change a later solve.
+  auto evaluateImuDiagnostic = [&](const std::shared_ptr<ceres::ImuErrorBase>& error,
+                                  ::ceres::ResidualBlockId block, double* residuals) {
+    const auto clone = error->clone();
+    std::vector<double*> parameters;
+    realtimeGraph_.problem_->GetParameterBlocksForResidualBlock(block, &parameters);
+    std::vector<const double*> constantParameters(parameters.begin(), parameters.end());
+    return clone->Evaluate(constantParameters.data(), residuals, nullptr);
+  };
+  if (std::getenv("OKVIS_VIO_DIAGNOSTICS")) {
+    const auto & latest = realtimeGraph_.states_.rbegin()->second;
+    const auto & link = latest.previousImuLink;
+    if (link.residualBlockId) {
+      double residuals[15];
+      if (evaluateImuDiagnostic(link.errorTerm, link.residualBlockId, residuals)) {
+        double squaredNorm = 0.0;
+        for (const auto residual : residuals) squaredNorm += residual*residual;
+        LOG(INFO) << "VIO_IMU_PRIOR timestamp_ns=" << latest.timestamp.toNSec()
+                  << " only_newest=" << onlyNewestState << " sse=" << squaredNorm;
+      }
+    }
+  }
   // run the optimiser
   realtimeGraph_.options_.linear_solver_type = ::ceres::DENSE_SCHUR;
   realtimeGraph_.optimise(numIter, numThreads, verbose);
@@ -922,8 +945,8 @@ void ViSlamBackend::optimiseRealtimeGraph(
     for (const auto & state : realtimeGraph_.states_) {
       const auto block = state.second.previousImuLink.residualBlockId;
       if (!block) continue;
-      double residuals[15], cost;
-      if (realtimeGraph_.problem_->EvaluateResidualBlock(block, false, &cost, residuals, nullptr)) {
+      double residuals[15];
+      if (evaluateImuDiagnostic(state.second.previousImuLink.errorTerm, block, residuals)) {
         double squaredNorm = 0.0;
         for (double residual : residuals) squaredNorm += residual * residual;
         imuSse += squaredNorm;
