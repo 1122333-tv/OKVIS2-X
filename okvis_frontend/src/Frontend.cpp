@@ -58,7 +58,6 @@
 
 #include <okvis/Frontend.hpp>
 #include <okvis/DescriptorSelection.hpp>
-#include <okvis/MatchingStatistics.hpp>
 
 // okvis ceres
 #include <okvis/ceres/PoseParameterBlock.hpp>
@@ -1335,7 +1334,6 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
   int ctr = 0;
   std::vector<cv::Mat> descriptorPool(params.nCameraSystem.numCameras());
   kinematics::Transformation T_WS1 = estimator.pose(StateId(currentFrameId));
-  detail::MatchingStatistics matchingStatistics;
   double reprErr = 0.0;
   size_t emptyMatchPartitions = 0;
   for (size_t im = 0; im < params.nCameraSystem.numCameras(); ++im) {
@@ -1528,7 +1526,7 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
     for(size_t t = 0; t<num_matching_threads; ++t) {
       threads[t]->join();
       delete threads[t];
-      matchingStatistics.add(reprErrors[t], ctrs[t]);
+      reprErr += reprErrors[t];
       emptyMatchPartitions += ctrs[t] == 0;
     }
 
@@ -1556,7 +1554,7 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
     }
   }
   //OKVIS_ASSERT_TRUE(Exception, estimator.areLandmarksInFrontOfCameras(), "before ransac")
-  reprErr = matchingStatistics.mean();
+  reprErr /= double(params.frontend.num_matching_threads * params.nCameraSystem.numCameras());
 
   // remove outliers -- initialise pose only without IMU or when matching with large repr. err.
   MultiFramePtr multiFrame = estimator.multiFrame(StateId(currentFrameId));
@@ -1768,8 +1766,6 @@ void Frontend::matchToMapByThread(
   const double reprojectionThresholdSq = reprojectionThreshold * reprojectionThreshold;
 
   ctrs[threadIdx] = 0;
-  reprErrors[threadIdx] = 0.0;
-  detail::FinalMatchStatistics finalMatches(numKeypoints);
 
   // go through all landmarks
   const size_t segment = numKeypoints/numThreads;
@@ -1822,14 +1818,13 @@ void Frontend::matchToMapByThread(
         if(dist < distances[k]) {
           distances[k] = dist;
           lmIds[k] = it->first;
-          finalMatches.select(k, sqrt(reprDist.dot(reprDist)));
+          ctrs[threadIdx]++;
+          reprErrors[threadIdx] += sqrt(reprDist.dot(reprDist));
         }
       }
     }
   }
-  const auto statistics = finalMatches.summary();
-  ctrs[threadIdx] = statistics.count;
-  reprErrors[threadIdx] = statistics.sum;
+  reprErrors[threadIdx] /= double(ctrs[threadIdx]);
 }
 
 // Match a new multiframe to existing keyframes:
