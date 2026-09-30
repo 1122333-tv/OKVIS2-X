@@ -85,16 +85,20 @@ def main():
     for ax,label in zip(axes,['APE, fixed alignment 15-35 s (m)','RPE 0.1 m translation (m)','Temporal observations after full solve']):
         ax.set_ylabel(label);ax.grid(alpha=.2);ax.legend(fontsize=8)
         for x in [36.05,44.5]:ax.axvline(x,color='black',ls=':',lw=.7)
-    for ax in axes[:2]:ax.set_yscale('symlog',linthresh=.01)
+    for ax in axes[:2]:
+        ax.set_yscale('symlog',linthresh=.01)
+        ax.set_ylim(bottom=0)
     axes[-1].set_xlabel('Seconds since first input frame')
     for col in range(3):
         for i,label in enumerate(['Fixed-alignment APE (m)','RPE 0.1 m (m)','Temporal observations']):
             ea[i,col].set_ylabel(label);ea[i,col].grid(alpha=.2);ea[i,col].legend(fontsize=7)
+            ea[i,col].set_ylim(bottom=0)
         ea[-1,col].set_xlabel('Seconds since first input frame')
     for col in range(2):
         for i,label in enumerate(['Fixed-alignment APE (m)','RPE 0.1 m translation (m)']):
             la[i,col].set_ylabel(label);la[i,col].grid(alpha=.2);la[i,col].legend(fontsize=7)
             if len(a.runs)>1:la[i,col].set_yscale('symlog',linthresh=.01)
+            la[i,col].set_ylim(bottom=0)
         la[1,col].set_xlabel('Seconds since first input frame')
     fig.savefig(a.output/'timeline.png',dpi=170);event.savefig(a.output/'events.png',dpi=170)
     local.savefig(a.output/'local_accuracy.png',dpi=170)
