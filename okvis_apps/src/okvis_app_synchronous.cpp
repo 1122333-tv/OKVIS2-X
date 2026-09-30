@@ -41,6 +41,7 @@
 
 #include <execinfo.h>
 #include "CameraDisplay.hpp"
+#include "VioCommandLine.hpp"
 
 
 /// \brief Main
@@ -59,38 +60,31 @@ int main(int argc, char **argv)
   FLAGS_colorlogtostderr = 1;
   FLAGS_minloglevel = 0;
 
-  if (argc != 4 && argc != 5) {
-    LOG(ERROR)<<
-    "Usage: ./" << argv[0] << " configuration-yaml-file dataset-folder [-rpg]";
+  okvis::VioCommandLine options;
+  try {
+    options = okvis::parseVioCommandLine(argc, argv);
+  } catch (const std::invalid_argument& error) {
+    LOG(ERROR) << error.what() << "\nUsage: " << argv[0]
+               << " configuration-yaml-file dataset-folder [output-folder] [-rpg]"
+               << " [--deterministic [0|1]]";
     return EXIT_FAILURE;
   }
-
   okvis::Duration deltaT(0.0);
-  bool rpg = false;
-  std::string savePath;
-  savePath = std::string(argv[2]);
-  if (argc == 5) {
-    savePath = std::string(argv[3]);
-    if(strcmp(argv[4], "-rpg")==0) {
-      rpg = true;
-    }
-  }
-  else if (argc == 4) {
-    if(strcmp(argv[3], "-rpg")!=0)  {
-      savePath = std::string(argv[3]);
-    }
-  }
-
-  // read configuration file
-  std::string configFilename(argv[1]);
+  const bool rpg = options.rpg;
+  const std::string savePath = options.output;
+  const std::string configFilename = options.config;
 
   okvis::ViParametersReader viParametersReader(configFilename);
   okvis::ViParameters parameters;
   viParametersReader.getParameters(parameters);
+  parameters.frontend.deterministic = options.deterministic;
+  LOG(INFO) << "SAMPLING deterministic=" << options.deterministic
+            << " seed=" << (options.deterministic ? "12345" : "time+clock")
+            << " scope=visual_ransac_only; thread settings unchanged";
 
   // dataset reader
   // the folder path
-  std::string path(argv[2]);
+  std::string path = options.dataset;
   std::shared_ptr<okvis::DatasetReaderBase> datasetReader;
   if(rpg){
     datasetReader.reset(new okvis::RpgDatasetReader(

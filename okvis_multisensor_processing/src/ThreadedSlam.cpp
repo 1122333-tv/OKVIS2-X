@@ -73,6 +73,7 @@ void ThreadedSlam::init()
   shutdown_ = false;
 
   // setup frontend
+  frontend_.setDeterministicSampling(parameters_.frontend.deterministic);
   frontend_.setBriskDetectionOctaves(size_t(parameters_.frontend.octaves));
   frontend_.setBriskDetectionThreshold(parameters_.frontend.detection_threshold);
   frontend_.setBriskDetectionAbsoluteThreshold(parameters_.frontend.absolute_threshold);

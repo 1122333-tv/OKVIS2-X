@@ -70,8 +70,8 @@ class FrameAbsolutePoseSacProblem : public AbsolutePoseSacProblem {
    * @param[in] algorithm The algorithm we want to use.
    * @warning Only okvis::absolute_pose::FrameNoncentralAbsoluteAdapter supported.
    */
-  FrameAbsolutePoseSacProblem(adapter_t & adapter, algorithm_t algorithm)
-      : base_t(adapter, algorithm),
+  FrameAbsolutePoseSacProblem(adapter_t & adapter, algorithm_t algorithm, bool randomSeed = true)
+      : base_t(adapter, algorithm, randomSeed),
         adapterDerived_(
             *static_cast<DERIVED_ADAPTER_T*>(&_adapter)) {
     OKVIS_ASSERT_TRUE(
@@ -90,8 +90,8 @@ class FrameAbsolutePoseSacProblem : public AbsolutePoseSacProblem {
    * @warning Only okvis::absolute_pose::FrameNoncentralAbsoluteAdapter supported.
    */
   FrameAbsolutePoseSacProblem(adapter_t & adapter, algorithm_t algorithm,
-                              const std::vector<int> & indices)
-      : base_t(adapter, algorithm, indices),
+                              const std::vector<int> & indices, bool randomSeed = true)
+      : base_t(adapter, algorithm, indices, randomSeed),
         adapterDerived_(
             *static_cast<DERIVED_ADAPTER_T*>(&_adapter)) {
     OKVIS_ASSERT_TRUE(

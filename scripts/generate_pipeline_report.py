@@ -136,7 +136,8 @@ def generate(run, automatic=False):
     changes={'默认到用户':differences(default,template) if default is not None and template is not None else [],
              '用户到运行':differences(template,effective) if template is not None and effective is not None else []}
     masks=compare_masks(run,m,sources,missing)
-    data={'run':str(run),'run_status':m['status'],'stages':m['stages'],'parameters':m['parameters'],'vio':vio,
+    sampling=m.get('sampling',{'deterministic':False,'seed':None,'scope':'visual_ransac_only'})
+    data={'sampling':sampling,'run':str(run),'run_status':m['status'],'stages':m['stages'],'parameters':m['parameters'],'vio':vio,
           'comparison':comp,'reference':ref,'groundtruth':gt,'time_offset':offset,'configuration_changes':changes,'mask_comparison':masks,'missing':missing,
           'limits':['GT 原样导入；不再次应用时间偏移或外参。','未校验物理 IMU 坐标系或 marker–IMU 标定一致性。',
                     '已准备数据仍引用 Basalt run，源目录及链接目标需要持续可读。','运行成功不代表精度验收通过。']}
@@ -187,7 +188,7 @@ def generate(run, automatic=False):
         return '<p>点击图像放大。各图沿用原始坐标轴范围和色标，请结合数值比较。</p><div class="table-scroll"><table class="plots"><colgroup><col style="width:14%"><col style="width:43%"><col style="width:43%"></colgroup><thead><tr><th>指标 / 图表</th><th>OKVIS2</th><th>Basalt</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
     sections=[]
     def section(id,title,body):sections.append((id,title,'<section id="'+id+'"><h2>'+e(title)+'</h2>'+body+'</section>'))
-    section('overview','输入与运行状态','<p>'+e(run.name)+'</p>'+file_block('运行输入参数、数据引用及各阶段状态。',run/'manifest.yaml',{'parameters':m['parameters'],'stages':m['stages']},'parameters / stages；自动报告生成时显示预期完成状态' if automatic else 'parameters / stages'))
+    section('overview','输入与运行状态','<p>'+e(run.name)+'</p><p>视觉 RANSAC 固定采样：'+('开启（种子 12345）' if sampling['deterministic'] else '关闭')+'；仅控制随机采样，不改变线程配置，不保证轨迹逐位一致。</p>'+file_block('运行输入参数、数据引用及各阶段状态。',run/'manifest.yaml',{'parameters':m['parameters'],'stages':m['stages'],'sampling':m.get('sampling',{'deterministic':False,'seed':None,'scope':'visual_ransac_only'})},'parameters / stages；自动报告生成时显示预期完成状态' if automatic else 'parameters / stages'))
     section('reference','参考轨迹与 GT',''.join('<p>'+e(v)+'</p>' for v in data['limits'])+file_block('导入 GT 的转换记录及有效时间段；仅展示来源记录，不重复变换 GT。',run/'02_reference/inputs/groundtruth/conversion.json',gt)+file_block('导入的时间对齐记录；仅作来源说明。',run/'02_reference/inputs/time_alignment/total_offset.json',offset))
     config_paths=[['默认','工程默认配置的运行快照',run/'01_preparation/inputs/default_config.yaml'],
                   ['用户','用户选择的配置模板快照（未指定 --config 时使用默认模板）',run/'01_preparation/inputs/algorithm_template.yaml'],

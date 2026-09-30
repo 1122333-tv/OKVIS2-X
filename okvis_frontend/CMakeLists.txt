@@ -92,3 +92,15 @@ install(TARGETS ${LIB_NAME} EXPORT okvisTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 install(DIRECTORY include/okvis DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} FILES_MATCHING PATTERN "*.hpp")
+
+# Explicit target usable with BUILD_TESTS=OFF in lightweight VIO builds.
+if(BUILD_TESTS)
+  add_executable(okvis_deterministic_sampling_test test/TestDeterministicSampling.cpp)
+else()
+  add_executable(okvis_deterministic_sampling_test EXCLUDE_FROM_ALL test/TestDeterministicSampling.cpp)
+endif()
+target_include_directories(okvis_deterministic_sampling_test PRIVATE ${OPENGV_INCLUDE_DIRS})
+target_link_libraries(okvis_deterministic_sampling_test PRIVATE okvis::Frontend ${OPENGV_LIBRARIES})
+if(BUILD_TESTS)
+  add_test(NAME DeterministicSampling COMMAND okvis_deterministic_sampling_test)
+endif()

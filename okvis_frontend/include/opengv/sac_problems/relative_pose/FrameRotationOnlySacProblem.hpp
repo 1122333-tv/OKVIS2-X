@@ -61,8 +61,8 @@ class FrameRotationOnlySacProblem : public RotationOnlySacProblem {
    * \param[in] adapter Visitor holding bearing vector correspondences etc.
    * @warning Only okvis::relative_pose::FrameRelativeAdapter supported.
    */
-  FrameRotationOnlySacProblem(adapter_t & adapter)
-      : base_t(adapter),
+  FrameRotationOnlySacProblem(adapter_t & adapter, bool randomSeed = true)
+      : base_t(adapter, randomSeed),
         adapterDerived_(
             *static_cast<opengv::relative_pose::FrameRelativeAdapter*>(&_adapter)) {
     OKVIS_ASSERT_TRUE(
@@ -79,8 +79,8 @@ class FrameRotationOnlySacProblem : public RotationOnlySacProblem {
    * @warning Only okvis::relative_pose::FrameRelativeAdapter supported.
    */
   FrameRotationOnlySacProblem(adapter_t & adapter,
-                              const std::vector<int> & indices)
-      : base_t(adapter, indices),
+                              const std::vector<int> & indices, bool randomSeed = true)
+      : base_t(adapter, indices, randomSeed),
         adapterDerived_(
             *static_cast<opengv::relative_pose::FrameRelativeAdapter*>(&_adapter)) {
     OKVIS_ASSERT_TRUE(

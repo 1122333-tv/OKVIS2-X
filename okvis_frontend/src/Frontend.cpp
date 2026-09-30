@@ -378,7 +378,7 @@ bool Frontend::verifyRecognisedPlace(const Estimator &estimator,
     LoopclosureAbsoluteModel;
   opengv::sac::Ransac<LoopclosureAbsoluteModel> ransac;
   std::shared_ptr<LoopclosureAbsoluteModel> absposeproblem_ptr(
-    new LoopclosureAbsoluteModel(adapter, LoopclosureAbsoluteModel::Algorithm::GP3P));
+    new LoopclosureAbsoluteModel(adapter, LoopclosureAbsoluteModel::Algorithm::GP3P, !deterministicSampling_));
   ransac.sac_model_ = absposeproblem_ptr;
   ransac.threshold_ = 16;
   ransac.max_iterations_ = 50;
@@ -2451,7 +2451,7 @@ bool Frontend::runRansac3d2d(
         opengv::absolute_pose::FrameNoncentralAbsoluteAdapter> AbsoluteModel;
   opengv::sac::Ransac<AbsoluteModel> ransac;
   std::shared_ptr<AbsoluteModel> absposeproblem_ptr(
-        new AbsoluteModel(adapter, AbsoluteModel::Algorithm::GP3P));
+        new AbsoluteModel(adapter, AbsoluteModel::Algorithm::GP3P, !deterministicSampling_));
   ransac.sac_model_ = absposeproblem_ptr;
   ransac.threshold_ = 16;
   ransac.max_iterations_ = 50;
@@ -2526,7 +2526,7 @@ int Frontend::runRansac2d2d(Estimator &estimator, const okvis::ViParameters& par
         FrameRotationOnlySacProblem;
     opengv::sac::Ransac<FrameRotationOnlySacProblem> rotation_only_ransac;
     std::shared_ptr<FrameRotationOnlySacProblem> rotation_only_problem_ptr(
-          new FrameRotationOnlySacProblem(adapter));
+          new FrameRotationOnlySacProblem(adapter, !deterministicSampling_));
     rotation_only_ransac.sac_model_ = rotation_only_problem_ptr;
     rotation_only_ransac.threshold_ = 9;
     rotation_only_ransac.max_iterations_ = 50;
@@ -2543,7 +2543,7 @@ int Frontend::runRansac2d2d(Estimator &estimator, const okvis::ViParameters& par
         FrameRelativePoseSacProblem;
     opengv::sac::Ransac<FrameRelativePoseSacProblem> rel_pose_ransac;
     std::shared_ptr<FrameRelativePoseSacProblem> rel_pose_problem_ptr(
-          new FrameRelativePoseSacProblem(adapter, FrameRelativePoseSacProblem::STEWENIUS));
+          new FrameRelativePoseSacProblem(adapter, FrameRelativePoseSacProblem::STEWENIUS, !deterministicSampling_));
     rel_pose_ransac.sac_model_ = rel_pose_problem_ptr;
     rel_pose_ransac.threshold_ = 9;  //(1.0 - cos(0.5/600));
     rel_pose_ransac.max_iterations_ = 50;

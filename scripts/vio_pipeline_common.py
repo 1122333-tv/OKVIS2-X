@@ -63,6 +63,23 @@ def audit_models(config,masks,output):
     return data
 
 
+def add_sampling_argument(parser):
+    parser.add_argument('--deterministic', nargs='?', const=1, type=int,
+                        choices=(0, 1), default=None,
+                        help='Fix visual RANSAC sampling only (seed 12345); threads unchanged')
+
+
+def sampling_settings(value, prior=None):
+    enabled = bool(value) if value is not None else bool((prior or {}).get('sampling', {}).get('deterministic', False))
+    return dict(deterministic=enabled, seed=12345 if enabled else None,
+                scope='visual_ransac_only', thread_settings_changed=False)
+
+
+def sampling_arguments(settings):
+    # Omit the disabled option for compatibility with historical binaries.
+    return ['--deterministic', '1'] if settings['deterministic'] else []
+
+
 def main():
     ap=argparse.ArgumentParser(__doc__)
     for name in ('basalt-run','calibration-dir','from-run','output','config','camera-mask-dir'):
@@ -73,9 +90,12 @@ def main():
     ap.add_argument('--evo-show-gui',action='store_true',help='Open evo metric and trajectory windows')
     ap.add_argument('--vio-max-frames',type=int,default=None)
     ap.add_argument('--binary',type=Path,default=ROOT/'build-vio/okvis_app_synchronous')
+    add_sampling_argument(ap)
     a=ap.parse_args()
     if a.vio_max_frames is not None and a.vio_max_frames<0:ap.error('Frame limit must be nonnegative')
     prior=read_manifest(a.from_run) if a.from_run else None
+    if a.step in ('compare','report') and a.deterministic is not None:
+        ap.error('--deterministic is a VIO execution option; cannot relabel an existing trajectory')
     if prior:
         a.from_run=a.from_run.resolve()
         if any((a.basalt_run,a.calibration_dir,a.config,a.camera_mask_dir)):ap.error('Reuse takes frozen inputs; do not override input parameters')
@@ -100,6 +120,7 @@ def main():
     m=dict(format='okvis-vio',version=VERSION,status='running',parameters=params,invocation=sys.argv,python=sys.executable,
            stages={},from_run=str(a.from_run) if prior else None,started_utc=datetime.now(timezone.utc).isoformat(),software={'okvis':git_info(ROOT)})
     def save():(path/'manifest.yaml').write_text(yaml.safe_dump(m,sort_keys=False,allow_unicode=True))
+    m['sampling']=sampling_settings(a.deterministic,prior)
     provenance=path/'provenance';provenance.mkdir()
     names=['run_vio_pipeline.py','vio_pipeline_common.py','pipeline_layout.py','basalt_run_data.py','convert_rig_to_okvis.py',
            'convert_okvis_trajectory.py','rig_calibration.py','capture_pipeline_common.py','interpolate_mocap_to_vio.py',
@@ -236,7 +257,7 @@ def main():
         if not voc.exists():shutil.copy2(ROOT/'resources/small_voc.yml.gz',voc)
         m['binary']=dict(path=str(binary),sha256=sha(binary),vocabulary_sha256=sha(voc),cmake_cache_sha256=sha(binary.parent/'CMakeCache.txt'))
         start_wall=time.monotonic()
-        command('vio',['/usr/bin/time','-v','-o',d/'diagnostics/resource_usage.txt',binary,d/'inputs/okvis2.yaml',data,d/'outputs'],cwd=d/'outputs')
+        command('vio',['/usr/bin/time','-v','-o',d/'diagnostics/resource_usage.txt',binary,d/'inputs/okvis2.yaml',data,d/'outputs',*sampling_arguments(m['sampling'])],cwd=d/'outputs')
         wall=time.monotonic()-start_wall
         poses=load(d/'outputs/okvis2-vio_trajectory.csv');summary=write(poses,d/'outputs')
         features={i:[] for i in range(4)}

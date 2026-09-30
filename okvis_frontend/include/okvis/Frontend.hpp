@@ -48,6 +48,9 @@ class Frontend : public ViFrontendInterface {
   Frontend(size_t numCameras, std::string dBowVocDir);
   virtual ~Frontend() override;
 
+  /// Set before processing starts. Each SAC problem uses its own fixed seed.
+  void setDeterministicSampling(bool enabled) { deterministicSampling_ = enabled; }
+
   /**
    * @brief Load another, previously saved VI-SLAM component.
    * @param filename Filename.
@@ -259,6 +262,7 @@ private:
   /// Mutexes for feature detectors and descriptors.
   std::vector<std::unique_ptr<std::mutex> > featureDetectorMutexes_;
 
+  bool deterministicSampling_ = false; ///< Fix visual SAC seeds, without changing threading.
   bool isInitialized_;        ///< Is the pose initialised?
   const size_t numCameras_;   ///< Number of cameras in the configuration.
 
