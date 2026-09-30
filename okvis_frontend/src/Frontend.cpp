@@ -57,6 +57,7 @@
 #pragma GCC diagnostic pop
 
 #include <okvis/Frontend.hpp>
+#include <okvis/DescriptorSelection.hpp>
 
 // okvis ceres
 #include <okvis/ceres/PoseParameterBlock.hpp>
@@ -1358,6 +1359,7 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
     descriptorPool[im] = cv::Mat(
         int(numDescriptorsToKeep)*pointMap.size(), 48, CV_8UC1);
     uchar* dataPtr = descriptorPool[im].data;
+    size_t emptyDescriptorCandidates = 0;
     for(MapPoints::const_iterator it = pointMap.begin(); it != pointMap.end(); ++it) {
       if(loopClosureLandmarksToUseExclusively) {
         if(!loopClosureLandmarksToUseExclusively->count(it->first)) {
@@ -1406,7 +1408,7 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
       landmarkToMatch.r_W.resize(3,numDescriptorsToKeep);
       landmarkToMatch.kids.reserve(numDescriptorsToKeep);
       const LandmarkId landmarkId = it->first;
-      size_t o=0;
+      size_t selectedDescriptorCount = 0;
       for (auto obsiter = it->second.observations.rbegin();
            obsiter != it->second.observations.rend();
            ++obsiter) {
@@ -1445,17 +1447,8 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
         }
 
         const double score = 0.5*(acos(cosViewpointChnage)/0.6+scaleChange/0.5);
-        double worstScore = 0.0;
         size_t worstIdx = 0;
-        // find location in buffer to write to
-        for(size_t n=0; n<numDescriptorsToKeep; ++n) {
-          if(bestScores[n] > worstScore) {
-            worstScore = bestScores[n];
-            worstIdx = n;
-          }
-        }
-        // store if better
-        if(score<bestScores[worstIdx]) {
+        if(detail::selectDescriptorSlot(score, bestScores, selectedDescriptorCount, worstIdx)) {
           // copy over descriptors
           const MultiFramePtr oldFrame =
               estimator.multiFrame(StateId(kid.frameId));
@@ -1471,22 +1464,20 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
           landmarkToMatch.r_W.col(worstIdx) = T_WC_old.r();
           landmarkToMatch.kids.push_back(kid);
 
-          // remember which were used
-          o = std::max(o, worstIdx);
-          bestScores[worstIdx] = score;
         }
       }
 
-      // crop unused bottom rows / right cols
-      landmarkToMatch.descriptors = landmarkToMatch.descriptors(cv::Rect(0, 0, 48, o + 1));
-      landmarkToMatch.e_W.conservativeResize(3,o + 1);
-      landmarkToMatch.r_W.conservativeResize(3,o + 1);
-      dataPtr += (o + 1)*48;
-
-      if(landmarkToMatch.descriptors.rows==0) {
-        // no observations -- weird.
+      // No eligible reference was copied. Never expose uninitialised pool
+      // bytes or bearing/centre columns as a synthetic one-row descriptor.
+      if(selectedDescriptorCount == 0) {
+        ++emptyDescriptorCandidates;
         continue;
       }
+      landmarkToMatch.descriptors = landmarkToMatch.descriptors(
+          cv::Rect(0, 0, 48, int(selectedDescriptorCount)));
+      landmarkToMatch.e_W.conservativeResize(3, selectedDescriptorCount);
+      landmarkToMatch.r_W.conservativeResize(3, selectedDescriptorCount);
+      dataPtr += selectedDescriptorCount * 48;
 
       // check classification
       if (it->second.classification == 10 || it->second.classification == 11) {
@@ -1497,6 +1488,10 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
       landmarksToMatch[landmarkId] = landmarkToMatch;
     }
     landmarksToMatchVec[im] = landmarksToMatch;
+    if(std::getenv("OKVIS_FEATURE_AUDIT") != nullptr && emptyDescriptorCandidates) {
+      LOG(INFO) << "DESCRIPTOR_SELECTION timestamp_ns=" << multiFrame->timestamp().toNSec()
+                << " camera=" << im << " skipped_empty=" << emptyDescriptorCandidates;
+    }
 
     // multithreaded matching
     const size_t num_matching_threads = size_t(params.frontend.num_matching_threads);
