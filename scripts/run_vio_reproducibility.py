@@ -64,7 +64,7 @@ def main():
     dump(out/'study.json',dict(baseline=str(base),binary_sha256=sha(binary),original_config_sha256=sha(base/'03_vio/inputs/okvis2.yaml'),
          commit=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip(),
          profiles={k:PROFILES[k] for k in a.profiles},repeats=a.repeats,platform=platform.platform(),
-         invocation=sys.argv,environment={k:env.get(k) for k in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS')},
+         invocation=sys.argv,environment={k:env.get(k) for k in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','OKVIS_REPRO_AUDIT')},
          binary_bundle={p.name:sha(p) for p in bundle.iterdir()},analyzer_sha256=sha(out/'analyze_vio_drift.py')))
     expected_stamps,_=read_states(base/'03_vio/outputs/okvis2-vio_trajectory.csv')
     completed=[];groups={}
@@ -75,7 +75,7 @@ def main():
             run.mkdir();(run/'outputs').mkdir()
             config=run/'config.yaml';write_yaml(config,profile_config(cfg,profile))
             command=[str(binary),str(config),str(base/'01_preparation/outputs/dataset/mav0'),str(run/'outputs'),'--deterministic','1']
-            manifest=dict(profile=profile,repeat=repeat,sampling={'deterministic':True,'seed':12345},command=command,binary_sha256=sha(binary),config_sha256=sha(config),status='running',baseline=str(base))
+            manifest=dict(profile=profile,repeat=repeat,sampling={'deterministic':True,'seed':12345},diagnostics={'graph_fingerprints':env.get('OKVIS_REPRO_AUDIT')=='1'},command=command,binary_sha256=sha(binary),config_sha256=sha(config),status='running',baseline=str(base))
             dump(run/'manifest.json',manifest);print('START',run,flush=True);start=time.monotonic()
             try:
                 with (run/'stage.log').open('x') as log:subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)

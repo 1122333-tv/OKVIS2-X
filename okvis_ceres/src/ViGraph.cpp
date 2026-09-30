@@ -24,6 +24,10 @@
 #include <chrono>
 #include <Eigen/SVD>
 #include <random>
+#include <cstdlib>
+#include <cstdint>
+#include <sstream>
+#include <typeinfo>
 #include <ceres/autodiff_cost_function.h>
 
 #include <Eigen/Dense>
@@ -1880,8 +1884,79 @@ void ViGraph::optimise(int maxIterations, int /*numThreads*/, bool verbose)
 //  else
 //      std::cout << "Covariance computation failed" << std::endl;
 
+  // Optional read-only diagnostics. Never evaluate residuals here: doing so could
+  // update cached IMU preintegrations and perturb the experiment being observed.
+  static const bool reproAudit = [] {
+    const char* value = std::getenv("OKVIS_REPRO_AUDIT");
+    return value && std::string(value) == "1";
+  }();
+  const auto audit = [&](const char* phase) {
+    if (!reproAudit || states_.empty()) return;
+    struct Hash {
+      uint64_t value = 14695981039346656037ULL;
+      void bytes(const void* data, size_t size) {
+        const auto* p = static_cast<const unsigned char*>(data);
+        for (size_t i = 0; i < size; ++i) { value ^= p[i]; value *= 1099511628211ULL; }
+      }
+      void text(const std::string& text) { bytes(text.c_str(), text.size() + 1); }
+    } values, measurements, parameterOrder, residualOrder;
+    std::map<const double*, std::string> labels;
+    for (const auto& entry : states_) {
+      const auto id = std::to_string(entry.first.value());
+      labels.emplace(entry.second.pose->parameters(), "pose/" + id);
+      labels.emplace(entry.second.speedAndBias->parameters(), "speed-bias/" + id);
+      if (entry.second.T_GW) labels.emplace(entry.second.T_GW->parameters(), "global/" + id);
+      for (size_t i = 0; i < entry.second.extrinsics.size(); ++i)
+        labels.emplace(entry.second.extrinsics[i]->parameters(), "extrinsics/" + id + "/" + std::to_string(i));
+    }
+    for (const auto& entry : landmarks_)
+      labels.emplace(entry.second.hPoint->parameters(), "landmark/" + std::to_string(entry.first.value()));
+    std::vector<double*> parameters;
+    problem_->GetParameterBlocks(&parameters);
+    std::map<std::string, double*> sorted;
+    size_t unknown = 0;
+    for (double* parameter : parameters) {
+      auto it = labels.find(parameter);
+      const auto label = it == labels.end() ? "unknown/" + std::to_string(unknown++) : it->second;
+      if (it == labels.end()) labels.emplace(parameter, label);
+      parameterOrder.text(label);
+      sorted.emplace(label, parameter);
+    }
+    for (const auto& entry : sorted) {
+      values.text(entry.first);
+      const int size = problem_->ParameterBlockSize(entry.second);
+      const bool fixed = problem_->IsParameterBlockConstant(entry.second);
+      values.bytes(&fixed, sizeof(fixed));
+      values.bytes(entry.second, sizeof(double) * size);
+    }
+    for (const auto& entry : observations_) {
+      const auto& key = entry.first;
+      measurements.text(std::to_string(key.frameId) + "/" + std::to_string(key.cameraIndex)
+                        + "/" + std::to_string(key.keypointIndex));
+      measurements.bytes(entry.second.errorTerm->measurement().data(), 2 * sizeof(double));
+      measurements.bytes(entry.second.errorTerm->information().data(), 4 * sizeof(double));
+    }
+    std::vector<::ceres::ResidualBlockId> residuals;
+    problem_->GetResidualBlocks(&residuals);
+    for (auto residual : residuals) {
+      residualOrder.text(typeid(*problem_->GetCostFunctionForResidualBlock(residual)).name());
+      std::vector<double*> connected;
+      problem_->GetParameterBlocksForResidualBlock(residual, &connected);
+      for (double* parameter : connected) residualOrder.text(labels.at(parameter));
+      residualOrder.text("end");
+    }
+    std::ostringstream line;
+    line << "REPRO_AUDIT timestamp_ns=" << states_.rbegin()->second.timestamp.toNSec()
+         << " phase=" << phase << " iterations=" << maxIterations
+         << " parameters=" << parameters.size() << " residuals=" << residuals.size()
+         << " unknown=" << unknown << " values=" << std::hex << values.value
+         << " measurements=" << measurements.value << " parameter_order=" << parameterOrder.value << " residual_order=" << residualOrder.value;
+    LOG(INFO) << line.str();
+  };
+  audit("before");
   // call solver
   ::ceres::Solve(options_, problem_.get(), &summary_);
+  audit("after");
 
   // summary output
   if (verbose) {
