@@ -50,7 +50,7 @@ def main():
         axes[1].plot(rpe['end_s'],rpe['translation_m'],label=label,lw=.7)
         records=read_records(run/'stage.log');origin=summary['origin_ns']
         last={}
-        for row in records.get('VIO_CONSTRAINT',[]):last[row['timestamp_ns'],row['camera']]=row['observations']
+        for row in records.get('VIO_CONSTRAINT',[]):last[row['timestamp_ns'],row['camera']]=row['temporal']
         totals={}
         for (t,c),n in last.items():totals[t]=totals.get(t,0)+n
         t=np.array(sorted(totals));n=np.array([totals[x] for x in t]);t=(t-origin)/1e9
@@ -75,19 +75,19 @@ def main():
                           trajectory_sha256=summary['trajectory_sha256']))
         for f in [run/'stage.log',run/'analysis/summary.json',run/'outputs/okvis2-vio_trajectory.csv']:
             sources[str(f.resolve())]=hashlib.sha256(f.read_bytes()).hexdigest()
-    for ax,label in zip(axes,['APE, fixed alignment 15-35 s (m)','RPE 0.1 m translation (m)','Latest-state observations after full solve']):
+    for ax,label in zip(axes,['APE, fixed alignment 15-35 s (m)','RPE 0.1 m translation (m)','Temporal observations after full solve']):
         ax.set_ylabel(label);ax.grid(alpha=.2);ax.legend(fontsize=8)
         for x in [36.05,44.5]:ax.axvline(x,color='black',ls=':',lw=.7)
     for ax in axes[:2]:ax.set_yscale('symlog',linthresh=.01)
     axes[-1].set_xlabel('Seconds since first input frame')
     for col in range(2):
-        for i,label in enumerate(['Fixed-alignment APE (m)','RPE 0.1 m (m)','Retained observations']):
+        for i,label in enumerate(['Fixed-alignment APE (m)','RPE 0.1 m (m)','Temporal observations']):
             ea[i,col].set_ylabel(label);ea[i,col].grid(alpha=.2);ea[i,col].legend(fontsize=7)
         ea[-1,col].set_xlabel('Seconds since first input frame')
     fig.savefig(a.output/'timeline.png',dpi=170);event.savefig(a.output/'events.png',dpi=170)
     plt.close(fig);plt.close(event)
     head='<meta charset="utf-8"><title>稳定模式漂移对照</title><style>body{font:16px sans-serif;max-width:1250px;margin:30px auto}table{border-collapse:collapse}td,th{padding:8px;border:1px solid #aaa}img{width:100%}</style>'
-    body='<h1>稳定模式漂移对照</h1><p>所有曲线来自保存的完整运行。IMU isolation 是使用未来样本的离线机制干预，不能作为最终修复。全程图使用对称对数轴，局部图使用线性轴。观测数取每帧最后一次求解后的记录。</p><table><tr><th>实验</th><th>APE RMSE (m)</th><th>44–55 s RPE RMSE (m)</th><th>63–66 s RPE RMSE (m)</th><th>输出/评估</th></tr>'
+    body='<h1>稳定模式漂移对照</h1><p>所有曲线来自保存的完整运行。IMU isolation 是使用未来样本的离线机制干预，不能作为最终修复。全程图使用对称对数轴，局部图使用线性轴。时序观测数取每帧最后一次求解后的记录，只统计同时关联其他帧的地图点观测。</p><table><tr><th>实验</th><th>APE RMSE (m)</th><th>44–55 s RPE RMSE (m)</th><th>63–66 s RPE RMSE (m)</th><th>输出/评估</th></tr>'
     for row in table:
         windows=row['rpe']['0.1m']['windows']
         body+=f"<tr><td>{html.escape(row['label'])}</td><td>{row['ape']['rmse']:.6f}</td><td>{windows['event_44_55']['translation']['rmse']:.6f}</td><td>{windows['event_63_66']['translation']['rmse']:.6f}</td><td>{row['poses']}/{row['common_poses']}</td></tr>"
