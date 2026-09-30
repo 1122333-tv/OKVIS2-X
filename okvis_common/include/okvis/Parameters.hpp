@@ -109,6 +109,7 @@ struct ImuParameters{
  * @brief Parameters for detection etc.
  */
 struct FrontendParameters {
+  bool visual_recovery = false; ///< Preserve a verified visual pose during frontend outlier rejection.
   bool deterministic = false; ///< Fix visual RANSAC sampling only; does not serialize processing.
   double detection_threshold; ///< Detection threshold. By default the uniformity radius in pixels.
   double absolute_threshold; ///< Absolute Harris corner threshold (noise floor).

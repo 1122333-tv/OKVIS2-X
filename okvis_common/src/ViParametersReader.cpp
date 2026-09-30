@@ -336,6 +336,11 @@ void ViParametersReader::readConfigFile(const std::string& filename) {
   parseEntry(file["frontend_parameters"], "num_matching_threads",
              viParameters_.frontend.num_matching_threads);
 
+  viParameters_.frontend.visual_recovery = false;
+  if (!file["frontend_parameters"]["visual_recovery"].empty()) {
+    parseEntry(file["frontend_parameters"], "visual_recovery", viParameters_.frontend.visual_recovery);
+  }
+
   // Parameters regarding the estimator.
   parseEntry(file["estimator_parameters"], "num_keyframes",
              viParameters_.estimator.num_keyframes);

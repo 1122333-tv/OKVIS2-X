@@ -1572,15 +1572,22 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
     numInitIter += 2;
   }
   bool secondRansac = false;
+  bool visualRecovery = false;
+  detail::RecoveryEvidence recoveryEvidence;
   if (std::getenv("OKVIS_VIO_DIAGNOSTICS")) {
     LOG(INFO) << "VIO_MATCH timestamp_ns=" << multiFrame->timestamp().toNSec()
               << " matches=" << ctr << " mean_reprojection=" << reprErr
               << " empty_partitions=" << emptyMatchPartitions
-              << " ransac=" << runRansac;
+              << " ransac=" << runRansac
+              << " predicted_px=" << T_WS1.r().x() << " predicted_py=" << T_WS1.r().y()
+              << " predicted_pz=" << T_WS1.r().z() << " predicted_qx=" << T_WS1.q().x()
+              << " predicted_qy=" << T_WS1.q().y() << " predicted_qz=" << T_WS1.q().z()
+              << " predicted_qw=" << T_WS1.q().w();
   }
   if(runRansac) {
     const bool ransacSuccess = runRansac3d2d(estimator, multiFrame->cameraSystem(), multiFrame,
-                                             runRansac, ransacRemoveOutliers);
+                                             runRansac, ransacRemoveOutliers,
+                                             &recoveryEvidence);
     T_WS1 = estimator.pose(StateId(currentFrameId));
     if (!ransacSuccess) {
       numInitIter += 4;
@@ -1588,18 +1595,39 @@ int Frontend::matchToMap(Estimator &estimator, const okvis::ViParameters& params
     }
   }
 
+  visualRecovery = detail::useVisualRecovery(
+      params.frontend.visual_recovery, isInitialized_, params.imu.use,
+      loopClosureLandmarksToUseExclusively != nullptr, reprErr, strictReprThreshold,
+      recoveryEvidence);
+  if (std::getenv("OKVIS_VIO_DIAGNOSTICS")) {
+    LOG(INFO) << "VIO_RECOVERY timestamp_ns=" << multiFrame->timestamp().toNSec()
+              << " activated=" << visualRecovery << " accepted=" << recoveryEvidence.accepted
+              << " inliers=" << recoveryEvidence.inliers << " cameras=" << recoveryEvidence.cameras
+              << " visual_px=" << T_WS1.r().x() << " visual_py=" << T_WS1.r().y()
+              << " visual_pz=" << T_WS1.r().z() << " visual_qx=" << T_WS1.q().x()
+              << " visual_qy=" << T_WS1.q().y() << " visual_qz=" << T_WS1.q().z()
+              << " visual_qw=" << T_WS1.q().w();
+  }
+  // When independent multi-camera geometry disagrees with the IMU prediction,
+  // classify observations at that verified pose. The full backend still uses
+  // every ordinary IMU factor and jointly optimises the retained observations.
+  // Do not let the pose-only IMU prior erase visual evidence before that solve.
   // do optimisation
   std::vector<StateId> updatedStatesRealtime;
   if(!loopClosureLandmarksToUseExclusively && ctr > 3) {
-    estimator.optimiseRealtimeGraph(
-        numInitIter, updatedStatesRealtime, params.estimator.realtime_num_threads,
-        false, true, isInitialized_);
+    if (!visualRecovery) {
+      estimator.optimiseRealtimeGraph(
+          numInitIter, updatedStatesRealtime, params.estimator.realtime_num_threads,
+          false, true, isInitialized_);
+    }
     /*int numInliers = */removeOutliers<CAMERA_GEOMETRY>(estimator,
                                     params.nCameraSystem,
                                     estimator.multiFrame(StateId(currentFrameId)));
-    estimator.optimiseRealtimeGraph(
-      2, updatedStatesRealtime, params.estimator.realtime_num_threads,
-      false, true, isInitialized_);
+    if (!visualRecovery) {
+      estimator.optimiseRealtimeGraph(
+        2, updatedStatesRealtime, params.estimator.realtime_num_threads,
+        false, true, isInitialized_);
+    }
     T_WS1 = estimator.pose(StateId(currentFrameId));
   }
   if (ctr <= 3 && isInitialized_) {
@@ -2449,7 +2477,9 @@ int Frontend::removeOutliers(Estimator &estimator,
 // Perform 3D/2D RANSAC.
 bool Frontend::runRansac3d2d(
     Estimator &estimator, const okvis::cameras::NCameraSystem& nCameraSystem,
-    std::shared_ptr<okvis::MultiFrame> currentFrame, bool initializePose, bool removeOutliers) {
+    std::shared_ptr<okvis::MultiFrame> currentFrame, bool initializePose, bool removeOutliers,
+    detail::RecoveryEvidence* recoveryEvidence) {
+  if (recoveryEvidence) *recoveryEvidence = detail::RecoveryEvidence{};
   if (estimator.numFrames() < 2) {
     // nothing to match against, we are just starting up.
     return false;
@@ -2488,6 +2518,14 @@ bool Frontend::runRansac3d2d(
   // deal with outliers and assign transformation
   numInliers = int(ransac.inliers_.size());
   if (numInliers >= 10 && double(ransac.inliers_.size())/double(numCorrespondences)>0.7) {
+    if (recoveryEvidence) {
+      recoveryEvidence->correspondences = numCorrespondences;
+      recoveryEvidence->inliers = ransac.inliers_.size();
+      recoveryEvidence->accepted = true;
+      std::set<size_t> cameras;
+      for (const auto index : ransac.inliers_) cameras.insert(size_t(adapter.camIndex(index)));
+      recoveryEvidence->cameras = cameras.size();
+    }
     // kick out outliers:
     if(removeOutliers) {
       std::vector<bool> inliers(numCorrespondences, false);
