@@ -121,7 +121,7 @@ bool ViGraphEstimator::eliminateStateByImuMerge(StateId stateId, StateId refId)
 
   // re-add appended (pseudo) IMU error term
   previousImuLink.residualBlockId = problem_->AddResidualBlock(
-      previousImuLink.errorTerm.get(), nullptr,
+      previousImuLink.errorTerm.get(), imuLossFunction(),
       previousState.pose->parameters(),  previousState.speedAndBias->parameters(),
       nextState.pose->parameters(),  nextState.speedAndBias->parameters());
 

@@ -878,6 +878,11 @@ protected:
 
   // loss function for reprojection errors
   std::shared_ptr< ::ceres::LossFunction> cauchyLossFunctionPtr_; ///< Cauchy loss.
+  std::shared_ptr< ::ceres::LossFunction> imuLossFunctionPtr_; ///< Optional IMU Huber loss.
+  /// Use the same policy when propagating, cloning and merging IMU links.
+  ::ceres::LossFunction* imuLossFunction() const {
+    return imuLossFunctionPtr_.get();
+  }
   std::shared_ptr< ::ceres::LossFunction> cauchyGpsLossFunctionPtr_; ///< Cauchy loss for GPS.
   std::shared_ptr< ::ceres::LossFunction> huberLossFunctionPtr_; ///< Huber loss.
   std::shared_ptr< ::ceres::LossFunction> tukeyDepthLossFunctionPtr_; ///< Tukey loss for Depth.

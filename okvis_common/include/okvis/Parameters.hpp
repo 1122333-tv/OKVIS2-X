@@ -98,6 +98,7 @@ struct ImuParameters{
   double sigma_ba;  ///< Initial accelerometer bias
   double sigma_gw_c; ///< Gyroscope drift noise density.
   double sigma_aw_c; ///< Accelerometer drift noise density.
+  double huber_loss_scale = 0.0; ///< Optional whitened 15D IMU residual Huber scale; 0 disables.
   Eigen::Vector3d g0;  ///< Mean of the prior gyro bias.
   Eigen::Vector3d a0;  ///< Mean of the prior accelerometer bias.
   double g;  ///< Earth acceleration.

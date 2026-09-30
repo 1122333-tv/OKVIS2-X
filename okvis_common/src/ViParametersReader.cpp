@@ -300,6 +300,13 @@ void ViParametersReader::readConfigFile(const std::string& filename) {
              viParameters_.imu.sigma_gw_c);
   parseEntry(file["imu_parameters"], "sigma_aw_c",
              viParameters_.imu.sigma_aw_c);
+  viParameters_.imu.huber_loss_scale = 0.0;
+  if (!file["imu_parameters"]["huber_loss_scale"].empty()) {
+    parseEntry(file["imu_parameters"], "huber_loss_scale", viParameters_.imu.huber_loss_scale);
+  }
+  OKVIS_ASSERT_TRUE(Exception, std::isfinite(viParameters_.imu.huber_loss_scale)
+                    && viParameters_.imu.huber_loss_scale >= 0.0,
+                    "imu_parameters.huber_loss_scale must be finite and nonnegative")
   parseEntry(file["imu_parameters"], "a0",
              viParameters_.imu.a0);
   parseEntry(file["imu_parameters"], "g0",
