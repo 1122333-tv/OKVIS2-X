@@ -35,7 +35,7 @@ def trajectory_bias(path, origin_ns):
 
 def summarize(log, output, origin_ns, trajectory=None):
     output.mkdir(parents=True, exist_ok=False)
-    records={name:[] for name in ('VIO_SOLVER','VIO_CONSTRAINT','VIO_FRONTEND','VIO_MATCH','FEATURE_AUDIT','VIO_RANSAC','VIO_REJECTION')}
+    records={name:[] for name in ('VIO_SOLVER','VIO_CONSTRAINT','VIO_FRONTEND','VIO_MATCH','FEATURE_AUDIT','VIO_RANSAC','VIO_REJECTION','VIO_IMU_PRIOR','VIO_RECOVERY')}
     for line in log.read_text().splitlines():
         for name in records:
             marker=name+' '

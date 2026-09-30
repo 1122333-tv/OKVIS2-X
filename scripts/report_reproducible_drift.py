@@ -32,7 +32,8 @@ def main():
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     fig,axes=plt.subplots(3,1,figsize=(12,10),sharex=True,layout='constrained')
-    event,ea=plt.subplots(3,2,figsize=(13,10),layout='constrained')
+    event,ea=plt.subplots(3,3,figsize=(18,10),layout='constrained')
+    local,la=plt.subplots(2,2,figsize=(12,7),layout='constrained')
     table=[];sources={};expected=None
     for run in a.runs:
         manifest=run/'reconciled_experiment.json'
@@ -48,6 +49,12 @@ def main():
         rpe=np.genfromtxt(run/'analysis/rpe_0.1m.csv',delimiter=',',names=True)
         axes[0].plot(data['time_s'],data['pre_trigger_alignment_m'],label=label,lw=1)
         axes[1].plot(rpe['end_s'],rpe['translation_m'],label=label,lw=.7)
+        for col,(lo,hi) in enumerate([(44,55),(63,66)]):
+            dm=(data['time_s']>=lo)&(data['time_s']<=hi)
+            rm=(rpe['end_s']>=lo)&(rpe['end_s']<=hi)
+            la[0,col].plot(data['time_s'][dm],data['pre_trigger_alignment_m'][dm],label=label,lw=1)
+            la[1,col].plot(rpe['end_s'][rm],rpe['translation_m'][rm],label=label,lw=1)
+            for ax in la[:,col]:ax.set_xlim(lo,hi)
         records=read_records(run/'stage.log');origin=summary['origin_ns']
         last={}
         for row in records.get('VIO_CONSTRAINT',[]):last[row['timestamp_ns'],row['camera']]=row['temporal']
@@ -55,7 +62,7 @@ def main():
         for (t,c),n in last.items():totals[t]=totals.get(t,0)+n
         t=np.array(sorted(totals));n=np.array([totals[x] for x in t]);t=(t-origin)/1e9
         axes[2].plot(t,n,label=label,lw=.7)
-        for col,(lo,hi) in enumerate([(34,38),(43,46)]):
+        for col,(lo,hi) in enumerate([(34,38),(43,46),(60,70)]):
             dm=(data['time_s']>=lo)&(data['time_s']<=hi);rm=(rpe['end_s']>=lo)&(rpe['end_s']<=hi);tm=(t>=lo)&(t<=hi)
             ea[0,col].plot(data['time_s'][dm],data['pre_trigger_alignment_m'][dm],label=label,lw=1)
             ea[1,col].plot(rpe['end_s'][rm],rpe['translation_m'][rm],label=label,lw=.8)
@@ -80,12 +87,18 @@ def main():
         for x in [36.05,44.5]:ax.axvline(x,color='black',ls=':',lw=.7)
     for ax in axes[:2]:ax.set_yscale('symlog',linthresh=.01)
     axes[-1].set_xlabel('Seconds since first input frame')
-    for col in range(2):
+    for col in range(3):
         for i,label in enumerate(['Fixed-alignment APE (m)','RPE 0.1 m (m)','Temporal observations']):
             ea[i,col].set_ylabel(label);ea[i,col].grid(alpha=.2);ea[i,col].legend(fontsize=7)
         ea[-1,col].set_xlabel('Seconds since first input frame')
+    for col in range(2):
+        for i,label in enumerate(['Fixed-alignment APE (m)','RPE 0.1 m translation (m)']):
+            la[i,col].set_ylabel(label);la[i,col].grid(alpha=.2);la[i,col].legend(fontsize=7)
+            if len(a.runs)>1:la[i,col].set_yscale('symlog',linthresh=.01)
+        la[1,col].set_xlabel('Seconds since first input frame')
     fig.savefig(a.output/'timeline.png',dpi=170);event.savefig(a.output/'events.png',dpi=170)
-    plt.close(fig);plt.close(event)
+    local.savefig(a.output/'local_accuracy.png',dpi=170)
+    plt.close(fig);plt.close(event);plt.close(local)
     head='<meta charset="utf-8"><title>稳定模式漂移对照</title><style>body{font:16px sans-serif;max-width:1250px;margin:30px auto}table{border-collapse:collapse}td,th{padding:8px;border:1px solid #aaa}img{width:100%}</style>'
     body='<h1>稳定模式漂移对照</h1><p>所有曲线来自保存的完整运行。IMU isolation 是使用未来样本的离线机制干预，不能作为最终修复。全程图使用对称对数轴，局部图使用线性轴。时序观测数取每帧最后一次求解后的记录，只统计同时关联其他帧的地图点观测。</p><table><tr><th>实验</th><th>APE RMSE (m)</th><th>44–55 s RPE RMSE (m)</th><th>63–66 s RPE RMSE (m)</th><th>输出/评估</th></tr>'
     for row in table:
@@ -93,7 +106,8 @@ def main():
         body+=f"<tr><td>{html.escape(row['label'])}</td><td>{row['ape']['rmse']:.6f}</td><td>{windows['event_44_55']['translation']['rmse']:.6f}</td><td>{windows['event_63_66']['translation']['rmse']:.6f}</td><td>{row['poses']}/{row['common_poses']}</td></tr>"
     body+='</table>'
     from PIL import Image
-    for name in ['timeline.png','events.png']:
+    body+='<p>local_accuracy 图在多运行对照时使用对称对数轴，单运行时使用线性轴。</p>'
+    for name in ['timeline.png','events.png','local_accuracy.png']:
         path=a.output/name
         with Image.open(path) as im:im.verify()
         body+=f'<h2>{name}</h2><img alt="{name}" src="data:image/png;base64,{base64.b64encode(path.read_bytes()).decode()}">'
