@@ -1,8 +1,10 @@
 # run_vio_pipeline.py 中文使用说明
 
-核对日期：2026-09-24。适用仓库：`/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X`。
+入口与示例更新：2026-10-08。适用仓库：`/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X`。
 
 本入口运行四目离线 OKVIS VIO，复用已有 Basalt run 的预处理数据、Basalt 轨迹和 IMU 真值，输出对比评测及自包含 HTML 报告。入口调用 `vio_pipeline_common.main()`，本文依据当前源码与 `--help`。
+
+完整流水线统一通过 `scripts/run_vio_pipeline.py` 启动。新运行显式传入 `--calibration-dir`，算法模板通过 `--config` 选择；解释器由调用命令指定。
 
 本文结构参考 [Basalt VIO 使用说明](/home/yuewang/Project/VSLAM/four_fisheye_rig/basalt-monado/doc/run_vio_pipeline使用说明.md)，但两个入口的参数、阶段和复用规则不同。
 
@@ -85,9 +87,58 @@ BUILD_JOBS=8 bash scripts/build_vio.sh
 
 默认无 GUI。需要实时窗口时追加 `--show-gui`；需要结束后打开 evo 评测窗口时追加 `--evo-show-gui`。两者相互独立。
 
+### 恢复策略的两种运行模式
+
+以下两个模板均启用 `visual_recovery: true`、`huber_loss_scale: 5.0`，保持 10 次迭代、四相机纯 VIO、关闭实时超时限制、回环及 final BA。该策略是有效缓解，未通过全部局部精度验收。
+
+| 模式 | `config/oak4p/` 下的模板 | 配套 CLI | 检测 | 匹配线程 | 实时求解线程 |
+| --- | --- | --- | --- | ---: | ---: |
+| 稳定复现 | `layout0916_vio_recovery_deterministic.yaml` | `--deterministic 1` | 串行 | 1 | 1 |
+| 正常运行 | `layout0916_vio_recovery.yaml` | `--deterministic 0` | 并行 | 4 | 3 |
+
+`--deterministic` 仍是命令行选项，不由 YAML 文件名自动启用。两个模板的算法内容只在上述三个线程设置上不同；物理标定及 `image_delay` 由流水线注入。未启用的全图优化线程仍保留 3，不参与本轮纯 VIO 运行。正常模式不承诺逐帧复现；下方记录了两段录制各一次 GUI 回放，不代表重复运行的精度范围已验证。
+
+历史 `layout0916_vio.yaml` 和 `layout0916_vio_debug.yaml` 均未启用上述恢复策略，分别保留原并行基线和原串行调试基线。
+
+### 稳定复现模式与 GUI
+
+以下使用当前 `build-vio/okvis_app_synchronous`。2026-10-08 核对时它与 2026-09-30 最终候选冻结二进制字节一致；后续重新编译后以新 run 保存的哈希为准。
+
+```bash
+cd /home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X
+BASE=results/20260916_142602_203941_DOHC2_validation_01/run_20260922T172208_vio_4b5dd4
+
+/home/yuewang/.local/share/pipx/venvs/evo/bin/python scripts/run_vio_pipeline.py \
+  --basalt-run ../basalt-monado/results/20260916_142602_203941_DOHC2_validation_01/run_20260918T151707_4586ee \
+  --calibration-dir /home/yuewang/Project/Calib/calibration_workspace/runs/layout0916_DOHC2_joint_dynamic_01_retry01/delivery/vio/kalibr_handeye \
+  --config config/oak4p/layout0916_vio_recovery_deterministic.yaml \
+  --camera-mask-dir "$BASE/01_preparation/inputs/source_masks" \
+  --run-name drift_recovery_gui \
+  --step all --deterministic 1 --show-gui
+```
+
+切换正常运行模式时，将两处参数改为：
+
+```bash
+--config config/oak4p/layout0916_vio_recovery.yaml --deterministic 0
+```
+
+每次默认创建 `results/20260916_142602_203941_DOHC2_validation_01/run_<时间>_drift_recovery_gui_<随机ID>/`，轨迹保存在 `03_vio/outputs/`，评测在 `04_vio_comparison/`，嵌入图片的报告为 `report/index.html`。
+
+2026-10-08 的 `run_20261008T144113_drift_recovery_gui_944d06` 使用原实验配置完成 GUI 回放，online/final/final-ba 三个文件与最终候选均字节一致。新稳定模板在注入相同标定和 mask 后与该配置等价；提取模板后未再次运行 VIO。系统库变化不应被推断为必然改变结果，跨环境复现仍需实际校验。
+
+正常模式的已保存回放结果（均为共同帧、SE(3) 无尺度拟合）：
+
+| 录制与新 run | 对照 | APE RMSE：对照 → 新运行 | VIO 耗时：对照 → 新运行 |
+| --- | --- | --- | --- |
+| Layout0916 `20260916_142602_203941_DOHC2_validation_01` / `run_20261008T145957_recovery_normal_gui_3a160e` | 当天稳定模式 `run_20261008T144113_drift_recovery_gui_944d06` | 7.138 → 5.408 cm | 461.98 → 347.93 s |
+| Layout0921 `20260921_171047_017923_DOHC2_debug` / `run_20261008T151536_recovery_normal_gui_d550a0` | 历史普通模式 `run_20260923T103406_vio_dfd46d` | 5.200 → 8.261 cm | 190.71 → 188.05 s |
+
+Layout0916 两次均输出 2402 帧、共同评估 2401 帧；Layout0921 均输出并评估 1195 帧。后者 0.5/1 m RPE RMSE 有所改善，但 APE 恶化 58.9%，不能称为整体精度提升。Layout0916 对照同时改变线程和随机采样；Layout0921 对照还使用不同历史二进制。均不是单变量、重复运行的因果验证。耗时只统计 VIO 进程，包含 GUI，不包括准备、评估和报告阶段。
+
 ## ⚙️ 全部命令行参数
 
-共 **13 项选项**，包含帮助，别名合并计数。下表默认值指新运行。
+共 **14 项选项**，包含帮助，别名合并计数。下表默认值指新运行。
 
 | 参数 | 含义 | 默认值与限制 |
 | --- | --- | --- |
@@ -104,8 +155,9 @@ BUILD_JOBS=8 bash scripts/build_vio.sh
 | `--evo-show-gui` | 交互评测窗口 | 默认关闭；仅 `all`、`compare` 完成后调用 |
 | `--vio-max-frames` | 最多输入多少组四目图像 | 非负整数，`0` 为全段；未指定时继承旧 run 的 `vio.max_frames`，否则为 `0` |
 | `--binary` | OKVIS 可执行文件 | 仓库 `build-vio/okvis_app_synchronous`；不从旧 run 继承；其目录还需匹配的 `CMakeCache.txt` 和词袋文件 |
+| `--deterministic [0\|1]` | 固定视觉 RANSAC 采样种子为 12345 | 新运行默认关闭；单独传开关或传 `1` 开启，`0` 关闭；复用时未指定则继承。只控制采样，不改变线程；`compare`/`report` 不接受 |
 
-布尔开关不附加 `1`、`true` 或 `false`。本入口不接受 `--run-id`、`--save-times`、`--start-time`、`--reference-camera`、`--max-offset`、`--stereo-debug` 或任意 C++ 参数透传。
+`--show-gui`、`--evo-show-gui` 不附加数值；`--deterministic` 可带 `0` 或 `1`，不接受 `true`/`false`。本入口不接受 `--run-id`、`--save-times`、`--start-time`、`--reference-camera`、`--max-offset`、`--stereo-debug` 或任意 C++ 参数透传。
 
 ## 🔀 阶段选择与复用规则
 
