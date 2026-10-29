@@ -48,13 +48,24 @@ def pose_matrix(p):
     return T
 
 
-def convert(calibration, template, output, mask_dir):
+def convert(calibration, template, output, mask_dir, imu_bias_policy='require-zero'):
     c=json.loads(Path(calibration).read_text())['value0']
     config=copy.deepcopy(yaml.safe_load(Path(template).read_text()))
     if any(len(c[k])!=4 for k in ('intrinsics','T_imu_cam','resolution')):
         raise ValueError('Expected four physical cameras')
-    for key in ('calib_accel_bias','calib_gyro_bias'):
-        if any(v!=0 for v in c[key]): raise ValueError('Nonzero IMU correction unsupported: '+key)
+    if imu_bias_policy not in ('require-zero', 'estimate-from-zero'):
+        raise ValueError('Unknown IMU bias policy: '+imu_bias_policy)
+    for key,size in (('calib_accel_bias',9),('calib_gyro_bias',12)):
+        if len(c[key])!=size or not all(math.isfinite(v) for v in c[key]):
+            raise ValueError('Invalid IMU correction: '+key)
+        if any(v!=0 for v in c[key][3:]):
+            raise ValueError('Nonzero IMU scale/misalignment unsupported: '+key)
+        if imu_bias_policy=='require-zero' and any(v!=0 for v in c[key]):
+            raise ValueError('Nonzero IMU correction unsupported: '+key)
+    if imu_bias_policy=='estimate-from-zero':
+        config['imu_parameters']['a0']=[0.,0.,0.]
+        config['imu_parameters']['g0']=[0.,0.,0.]
+        config['imu_parameters']['s_a']=[1.,1.,1.]
     cameras=[];reports=[]
     output=Path(output);output.parent.mkdir(parents=True,exist_ok=True)
     masks=output.parent/'masks';masks.mkdir(exist_ok=True)
@@ -84,6 +95,11 @@ def convert(calibration, template, output, mask_dir):
         config['imu_parameters'][target]=float(v[0])
     write_yaml(output,config)
     report=dict(calibration_sha256=sha(calibration),template_sha256=sha(template),cameras=reports,
+                imu_bias_policy=imu_bias_policy,
+                imu_correction=dict(source_accel=c['calib_accel_bias'],source_gyro=c['calib_gyro_bias'],
+                    fixed_bias_applied=False,raw_samples_unchanged=True,
+                    initial_accel_bias=config['imu_parameters']['a0'],initial_gyro_bias=config['imu_parameters']['g0'],
+                    online_bias_estimation=True),
                 cam_time_offset_ns=offset,image_delay_seconds=-offset/1e9,
                 timestamp_equation='t_imu_ns = t_camera_ns + cam_time_offset_ns',
                 transform_equation='T_SC = T_imu_cam; S=physical IMU',
@@ -94,4 +110,5 @@ def convert(calibration, template, output, mask_dir):
 if __name__=='__main__':
     ap=argparse.ArgumentParser(__doc__)
     for name in ('calibration','template','output','mask-dir'):ap.add_argument('--'+name,type=Path,required=True)
-    a=ap.parse_args();convert(a.calibration,a.template,a.output,a.mask_dir)
+    ap.add_argument('--imu-bias-policy',choices=['require-zero','estimate-from-zero'],default='require-zero')
+    a=ap.parse_args();convert(a.calibration,a.template,a.output,a.mask_dir,a.imu_bias_policy)

@@ -189,6 +189,8 @@ def generate(run, automatic=False):
     sections=[]
     def section(id,title,body):sections.append((id,title,'<section id="'+id+'"><h2>'+e(title)+'</h2>'+body+'</section>'))
     section('overview','输入与运行状态','<p>'+e(run.name)+'</p><p>视觉 RANSAC 固定采样：'+('开启（种子 12345）' if sampling['deterministic'] else '关闭')+'；仅控制随机采样，不改变线程配置，不保证轨迹逐位一致。</p>'+file_block('运行输入参数、数据引用及各阶段状态。',run/'manifest.yaml',{'parameters':m['parameters'],'stages':m['stages'],'sampling':m.get('sampling',{'deterministic':False,'seed':None,'scope':'visual_ransac_only'})},'parameters / stages；自动报告生成时显示预期完成状态' if automatic else 'parameters / stages'))
+    if m['parameters'].get('imu_bias_policy')=='estimate-from-zero':
+        section('imu-policy','IMU bias 处理','<p>OKVIS 使用原始 IMU，未应用交付中的固定 bias，a0/g0 为零，在线估计总偏置。Basalt 参考结果应用原固定标定后在线估计剩余偏置。两者此项输入处理不同；原始标定保留。</p>')
     section('reference','参考轨迹与 GT',''.join('<p>'+e(v)+'</p>' for v in data['limits'])+file_block('导入 GT 的转换记录及有效时间段；仅展示来源记录，不重复变换 GT。',run/'02_reference/inputs/groundtruth/conversion.json',gt)+file_block('导入的时间对齐记录；仅作来源说明。',run/'02_reference/inputs/time_alignment/total_offset.json',offset))
     config_paths=[['默认','工程默认配置的运行快照',run/'01_preparation/inputs/default_config.yaml'],
                   ['用户','用户选择的配置模板快照（未指定 --config 时使用默认模板）',run/'01_preparation/inputs/algorithm_template.yaml'],

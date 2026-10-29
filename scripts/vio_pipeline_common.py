@@ -90,6 +90,7 @@ def main():
     ap.add_argument('--evo-show-gui',action='store_true',help='Open evo metric and trajectory windows')
     ap.add_argument('--vio-max-frames',type=int,default=None)
     ap.add_argument('--binary',type=Path,default=ROOT/'build-vio/okvis_app_synchronous')
+    ap.add_argument('--imu-bias-policy',choices=['require-zero','estimate-from-zero'])
     add_sampling_argument(ap)
     a=ap.parse_args()
     if a.vio_max_frames is not None and a.vio_max_frames<0:ap.error('Frame limit must be nonnegative')
@@ -98,7 +99,7 @@ def main():
         ap.error('--deterministic is a VIO execution option; cannot relabel an existing trajectory')
     if prior:
         a.from_run=a.from_run.resolve()
-        if any((a.basalt_run,a.calibration_dir,a.config,a.camera_mask_dir)):ap.error('Reuse takes frozen inputs; do not override input parameters')
+        if any((a.basalt_run,a.calibration_dir,a.config,a.camera_mask_dir,a.imu_bias_policy)):ap.error('Reuse takes frozen inputs; do not override input parameters')
         params=prior['parameters'].copy()
     else:
         if not a.basalt_run or not a.calibration_dir:ap.error('--basalt-run and --calibration-dir required')
@@ -108,6 +109,7 @@ def main():
         info=inspect(a.basalt_run,a.camera_mask_dir)
         params=dict(basalt_run=str(a.basalt_run),calibration_dir=str(a.calibration_dir),config=str(a.config),
                     config_sha256=sha(a.config),dataset=info['dataset_identity'],prepared_dataset=str(info['dataset']))
+        params['imu_bias_policy']=a.imu_bias_policy or 'require-zero'
     a.vio_max_frames=a.vio_max_frames if a.vio_max_frames is not None else (prior or {}).get('vio',{}).get('max_frames',0)
     if a.step=='report':
         from generate_pipeline_report import generate
@@ -194,7 +196,7 @@ def main():
         effective=c['value0']['cam_time_offset_ns']+adjustment
         if effective!=info['offset']:raise ValueError('Delivery camera offset conflicts with prepared group timing')
         c['value0']['cam_time_offset_ns']=effective;dump(d/'outputs/calibration.json',c)
-        conversion=convert(d/'outputs/calibration.json',d/'inputs/algorithm_template.yaml',d/'outputs/okvis2.yaml',d/'inputs/source_masks')
+        conversion=convert(d/'outputs/calibration.json',d/'inputs/algorithm_template.yaml',d/'outputs/okvis2.yaml',d/'inputs/source_masks',params['imu_bias_policy'])
         data=d/'outputs/dataset/mav0';times=None;count=0;hashes={}
         for i in range(4):
             name=f'cam{i}';cp=data/name;r=rows(cp/'data.csv');ts=[int(x[0]) for x in r]
