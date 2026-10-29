@@ -1,6 +1,6 @@
 # run_vio_pipeline.py 中文使用说明
 
-入口与示例更新：2026-10-08。适用仓库：`/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X`。
+入口与示例更新：2026-10-28。适用仓库：`/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X`。
 
 本入口运行四目离线 OKVIS VIO，复用已有 Basalt run 的预处理数据、Basalt 轨迹和 IMU 真值，输出对比评测及自包含 HTML 报告。入口调用 `vio_pipeline_common.main()`，本文依据当前源码与 `--help`。
 
@@ -30,19 +30,21 @@ flowchart LR
 | 输入 | 要求 |
 | --- | --- |
 | Basalt run | 包含 `manifest.yaml`，`prepare`、`gt`、`vio` 阶段均为 `complete` 或 `reused`；即使本次只做 prepare，也必须满足 |
-| 准备数据 | 四路 `cam0`～`cam3` CSV 时间戳完全一致、严格递增，图像存在且分辨率匹配标定；IMU CSV 为七列有限数值 |
+| 准备数据 | 直接复用 Basalt 配组；核对四路 CSV 结构、相对路径、时间戳完全一致且严格递增及索引哈希。跳过逐张图片的存在性／尺寸预检；IMU CSV 为七列有限数值 |
 | 参考轨迹与 GT | Basalt 轨迹和 GT 时间有交集；GT 旁的 `conversion.json` 包含 `valid_segments_ns` |
 | 标定交付 | 至少 `calibration.json`、`export_manifest.json`；schema 1，物理相机顺序为 cam0～cam3，声明时间参考相机 |
 | 相机模型 | 当前转换器仅支持完整四目 KB4；对有效掩膜区域执行模型兼容性审计 |
-| IMU 标定 | 当前转换器要求 `calib_accel_bias`、`calib_gyro_bias` 修正数组全零；四类三轴噪声参数均为正、各向同性 |
+| IMU 标定 | 默认要求修正数组全零；显式 `--imu-bias-policy estimate-from-zero` 可保留原始 IMU、忽略固定 bias 并从零在线估计。两种策略都拒绝非零尺度／非正交修正；四类三轴噪声参数均为正、各向同性 |
 | 掩膜 | Basalt run 中启用并保存的掩膜，或显式 `--camera-mask-dir`；必须有四张同分辨率 PNG |
 | 二进制 | 默认 `build-vio/okvis_app_synchronous`，支持 `--imu-support-ns`；prepare 阶段就会调用它 |
 | 构建环境 | prepare 会现场编译相机审计程序，需要 `c++`、Eigen、OpenCV 开发文件和 `pkg-config opencv4` |
-| Python | NumPy、Pillow、PyYAML、Matplotlib、evo；交互 evo 窗口另需 Qt 后端 |
+| Python | NumPy、Pillow、PyYAML、Matplotlib、SciPy、evo；交互 evo 窗口另需 Qt 后端 |
 
 本入口不要求重新提供原始 mocap 录制或 mocap 标定来生成 GT，但不会自动证明本次交付与导入 GT 的物理 IMU 坐标系、marker–IMU 外参完全一致。
 
 数据集仍通过符号链接引用 Basalt 准备目录及原始图像。保留这些目录和挂载；不能仅复制一个 OKVIS run 就假定完全独立。
+
+从 Basalt run 启动时默认跳过逐图预检，不需要额外开关。准备记录以 `images_checked: 0`、`images_referenced` 和 `image_validation.status: skipped` 明确记录；不把跳过写成检查通过。相机模型／掩膜、标定时间参考和 IMU 支持检查照常执行。估计器仍在处理每帧时正常读取图片。
 
 ## 🚀 完整运行示例
 
@@ -95,6 +97,7 @@ BUILD_JOBS=8 bash scripts/build_vio.sh
 | --- | --- | --- | --- | ---: | ---: |
 | 稳定复现 | `layout0916_vio_recovery_deterministic.yaml` | `--deterministic 1` | 串行 | 1 | 1 |
 | 正常运行 | `layout0916_vio_recovery.yaml` | `--deterministic 0` | 并行 | 4 | 3 |
+| 并行、固定采样 | `layout0916_vio_recovery.yaml` | `--deterministic 1` | 并行 | 4 | 3 |
 
 `--deterministic` 仍是命令行选项，不由 YAML 文件名自动启用。两个模板的算法内容只在上述三个线程设置上不同；物理标定及 `image_delay` 由流水线注入。未启用的全图优化线程仍保留 3，不参与本轮纯 VIO 运行。正常模式不承诺逐帧复现；下方记录了两段录制各一次 GUI 回放，不代表重复运行的精度范围已验证。
 
@@ -138,7 +141,7 @@ Layout0916 两次均输出 2402 帧、共同评估 2401 帧；Layout0921 均输�
 
 ## ⚙️ 全部命令行参数
 
-共 **14 项选项**，包含帮助，别名合并计数。下表默认值指新运行。
+共 **16 项选项**，包含帮助，别名合并计数。下表默认值指新运行。
 
 | 参数 | 含义 | 默认值与限制 |
 | --- | --- | --- |
@@ -156,6 +159,8 @@ Layout0916 两次均输出 2402 帧、共同评估 2401 帧；Layout0921 均输�
 | `--vio-max-frames` | 最多输入多少组四目图像 | 非负整数，`0` 为全段；未指定时继承旧 run 的 `vio.max_frames`，否则为 `0` |
 | `--binary` | OKVIS 可执行文件 | 仓库 `build-vio/okvis_app_synchronous`；不从旧 run 继承；其目录还需匹配的 `CMakeCache.txt` 和词袋文件 |
 | `--deterministic [0\|1]` | 固定视觉 RANSAC 采样种子为 12345 | 新运行默认关闭；单独传开关或传 `1` 开启，`0` 关闭；复用时未指定则继承。只控制采样，不改变线程；`compare`/`report` 不接受 |
+| `--imu-bias-policy` | 固定 IMU 标定的输入处理策略 | `require-zero`（默认）或 `estimate-from-zero`；后者将 a0/g0 设零、s_a 设一，原始 IMU 不扣 bias，在线状态估计总偏置；从旧 run 复用时禁止覆盖 |
+| `--evaluation-profile` | 对齐和评测指标口径 | `legacy`（新运行默认）、`static` 或 `motion`；复用时默认继承，可用 `--step compare` 重算，但 `report` 不允许改标签 |
 
 `--show-gui`、`--evo-show-gui` 不附加数值；`--deterministic` 可带 `0` 或 `1`，不接受 `true`/`false`。本入口不接受 `--run-id`、`--save-times`、`--start-time`、`--reference-camera`、`--max-offset`、`--stereo-debug` 或任意 C++ 参数透传。
 
@@ -169,10 +174,10 @@ Layout0916 两次均输出 2402 帧、共同评估 2401 帧；Layout0921 均输�
 | `compare` | 不支持 | 复用 prepare、reference、vio，重做评测和报告 |
 | `report` | 不支持 | 直接重生成原 run 的 `report/`；不创建新 run、不执行 VIO 或 evo |
 
-1. `--from-run` 禁止同时传 `--basalt-run`、`--calibration-dir`、`--config`、`--camera-mask-dir`，即使值与旧 run 相同也会报错。修改这些输入应新开运行。
+1. `--from-run` 禁止同时传 `--basalt-run`、`--calibration-dir`、`--config`、`--camera-mask-dir`、`--imu-bias-policy`，即使值与旧 run 相同也会报错。修改这些输入应新开运行。
 2. 被复用阶段必须完成，且实体产物 SHA-256 与原 manifest 一致；数据索引另外核对哈希。失败 run 中已经完整记录的前置阶段仍可复用。
-3. 复用复制阶段目录，保留符号链接并调整指向旧 run 内部的链接；会占用额外空间。图像内容不重新计算全量哈希，新 prepare 检查图像存在性和尺寸。
-4. GUI 开关不继承。帧数限制会继承；从短段 run 恢复全段须明确 `--vio-max-frames 0`。限制仅影响 VIO，不减少新 prepare 检查的图像数量。
+3. 复用复制阶段目录，保留符号链接并调整指向旧 run 内部的链接；会占用额外空间。新 prepare 直接复用 Basalt 配组，跳过逐图存在性、尺寸及内容哈希检查；复用旧 prepare 则保留其当时的检查记录。
+4. GUI 开关不继承。帧数限制会继承；从短段 run 恢复全段须明确 `--vio-max-frames 0`。限制仅影响 VIO，prepare 仍核对完整图像索引，不逐张打开图片。
 5. 新运行名为 `run_<本机本地时间YYYYMMDDTHHMMSS>_<run-name>_<随机6位后缀>`；本机时区为 Asia/Shanghai。manifest 的开始／结束时间为 UTC。
 6. `report` 是原地更新的例外：修改报告文件，不改变原 manifest 的运行状态或重新计算其中旧 report 阶段的哈希。最新报告生成记录看 `report/generation.json`。
 
@@ -315,11 +320,50 @@ GUI 不改变估计输入分辨率，但有绘制、图像复制和显示开销�
 
 - **Native**：各算法自身与 GT 匹配的有效覆盖范围。
 - **Common**：双方与 GT 均有效的精确共同时间戳；各自进行 SE(3) 无尺度对齐。
-- 输出 APE 平移及 0.1 m、0.5 m、1 m 的距离 RPE。距离配对不足的指标明确标记不可计算；不会伪造零误差。
+- 默认 `legacy` 输出 APE 平移及 0.1 m、0.5 m、1 m 的距离 RPE。配对不足的指标明确标记不可计算；不会伪造零误差。
 - 时间偏移使用导入的冻结 GT，不通过拟合 VIO 再调时间。报告同时展示配置差异、覆盖率、资源统计和对齐诊断。
 - 掩膜按有效像素比较，消除两套黑白语义反转。有变化时自动展开，无变化时折叠；四张叠加图一行四列。
 - 叠加图：黑色保持有效，白色保持排除，绿色新增排除，红色减少排除。每路列出两类变化数量。
 - 默认掩膜优先读取 prepare 快照；历史 run 回退读取 Basalt 源文件当前内容，并明确注明来源。缺失或尺寸不同不会伪称一致。
+
+### POC 静止／运动口径
+
+`static` 使用匹配轨迹起始 1 s 的平均位姿对齐，避免用静止位置拟合不适定的旋转；`motion` 使用整段匹配位置 SE(3) 对齐。两者都不拟合尺度，分别生成 Native 和 Common；Common 为主比较，双方使用完全相同的 GT 和指标帧对，并保存端点哈希验证。
+
+| 指标 | static | motion | 统计 |
+| --- | --- | --- | --- |
+| APE 平移、ARE 旋转 | 有 | 有 | RMSE、P95、P99、均值、中位数、标准差、最小／最大及样本数 |
+| 0.1 s、1 s 的 RPE 平移及 RRE 旋转 | 有 | 有 | 时间端点使用整数 ns，容差为间隔的 10% |
+| 0.1 m、0.5 m、1 m 的 RPE／RRE | 不适用 | 有 | 根据 GT 路程选择帧对，容差 10% |
+| 位置／姿态抖动、首尾 1 s 均值差 | 有 | 不适用 | 保存在 `static_stability`，不替代 GT 误差 |
+
+相对误差帧对不跨 GT 空洞、超过中位帧周期 1.8 倍的输出间隙或可用的 Basalt reset 事件。Common 使用两方连续性边界的并集。OKVIS 当前没有显式 reset 事件流，因此只能检查输出时间间隙，不能声称覆盖所有内部重置。静止与运动的对齐不同，不应混为一个排名。
+
+POC 原始统计使用 m／deg；总报告将平移换算为 cm，旋转为 °。每个 `*_errors.csv` 保留整数纳秒端点、分段和原始误差。统计 P95 是样本分位数，不是置信区间。采集／mocap QA 的原有拒绝状态不因估计器完成而改变。
+
+### 1026 六包批量测试及中断恢复
+
+批量入口按水平静止、竖直静止、小范围运动、大范围运动、动态背景、静止有人经过的顺序串行处理，各包内部保持并行。最后一包是原五包 POC 报告的补充。以下命令用于新建输出目录：
+
+```bash
+/home/yuewang/.local/share/pipx/venvs/evo/bin/python -B -u scripts/run_poc_batch.py \
+  --basalt-experiment /home/yuewang/Project/VSLAM/four_fisheye_rig/basalt-monado/results/20261026_poc_six_calibration1023B \
+  --calibration-dir /mnt/HFMs_datasets_safe/VSLAM_benchmark/v0.1/RK_SC233/Layout_1021/calibration_1023_B \
+  --output /home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/results/20261028_poc1026_parallel_rawbias
+```
+
+入口冻结二进制及算法模板，使用 `estimate-from-zero`、并行恢复模板、`--deterministic 1`、关闭 GUI，每包一次全段回放。Basalt 参考仍应用固定标定后估计剩余 bias，因此这是明确记录两方输入策略差异的对比，不是固定 bias 的单变量实验。
+
+已有批次中断后，使用原命令追加 `--resume`。文件锁防止两个批次同时写同一结果；恢复会核对冻结二进制、配置、运行库和保护输入的哈希。完整包跳过，完整 VIO 只重做后续评测；未完整保存的 VIO 必须从包首重跑。旧 run 和尝试记录保留，新 run 复用通过哈希检查的准备结果。输入图片不逐字节复算哈希。
+
+批次状态为 `state.json`，结束后检查 `preservation.json`、各包 manifest 及 `report/index.html`。独立重生成总报告：
+
+```bash
+/home/yuewang/.local/share/pipx/venvs/evo/bin/python -B scripts/summarize_poc_batch.py \
+  /home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/results/20261028_poc1026_parallel_rawbias
+```
+
+长任务可交由用户级后台服务运行，避免依赖聊天窗口生命周期；2026-10-28 本机批次的服务名为 `okvis-poc1026-rawbias.service`。其低优先级和 32／40 GiB 内存软／硬上限（首包起始为 12／16 GiB）只用于保护桌面，算法参数未变。性能统计包含 NAS 读取和日志，缓存与主机负载未控制。
 
 ## 🔎 常见问题
 
@@ -342,10 +386,11 @@ GUI 不改变估计输入分辨率，但有绘制、图像复制和显示开销�
 
 ## 🔗 实现依据与相关文档
 
+- [SC233 1026 POC 六包对比记录](dev/sc233_poc1026_comparison_20261028.md)：输入配置、共同帧指标、阶段耗时和验证范围。
 - [入口](/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/scripts/run_vio_pipeline.py)、[阶段调度与参数](/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/scripts/vio_pipeline_common.py)。
 - [Basalt 产物读取](/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/scripts/basalt_run_data.py)、[结果布局](/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/scripts/pipeline_layout.py)。
 - [标定转换](/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/scripts/convert_rig_to_okvis.py)、[掩膜生成工具](/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/scripts/make_kb4_domain_masks.py)。
 - [轨迹评测](/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/scripts/compare_vio_runs.py)、[报告生成](/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/scripts/generate_pipeline_report.py)。
 - [GUI 入口](/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/okvis_apps/src/okvis_app_synchronous.cpp)、[原始分辨率拼接](/home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X/okvis_apps/src/CameraDisplay.hpp)。
 
-本次文档核对不重新运行 VIO。示例中的历史 run 路径用于说明和复用，读取前需确认目录仍在；新的输入仍须通过完整 prepare 检查。
+旧示例的历史 run 路径用于说明和复用，读取前需确认目录仍在；1026 批次进度和是否完成以保存的 `state.json` 及各包 manifest 为准。新的输入仍须通过完整 prepare 检查。
