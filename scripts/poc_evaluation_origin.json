@@ -1,0 +1,5 @@
+{
+  "source": "basalt-monado/scripts/evaluate_poc_trajectory.py",
+  "sha256": "ad09a2301f08e47ef356671250595f109af0d8c6d0c73e7c382b2a5c2dddf4cd",
+  "adapted": "alignment, statistics, timestamp pairs and segment boundaries; local paired evaluation and report output"
+}

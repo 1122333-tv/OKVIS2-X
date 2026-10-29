@@ -91,6 +91,7 @@ def main():
     ap.add_argument('--vio-max-frames',type=int,default=None)
     ap.add_argument('--binary',type=Path,default=ROOT/'build-vio/okvis_app_synchronous')
     ap.add_argument('--imu-bias-policy',choices=['require-zero','estimate-from-zero'])
+    ap.add_argument('--evaluation-profile',choices=['legacy','static','motion'])
     add_sampling_argument(ap)
     a=ap.parse_args()
     if a.vio_max_frames is not None and a.vio_max_frames<0:ap.error('Frame limit must be nonnegative')
@@ -110,6 +111,9 @@ def main():
         params=dict(basalt_run=str(a.basalt_run),calibration_dir=str(a.calibration_dir),config=str(a.config),
                     config_sha256=sha(a.config),dataset=info['dataset_identity'],prepared_dataset=str(info['dataset']))
         params['imu_bias_policy']=a.imu_bias_policy or 'require-zero'
+    if a.step=='report' and a.evaluation_profile is not None:
+        ap.error('Report cannot relabel an existing evaluation')
+    params['evaluation_profile']=a.evaluation_profile or params.get('evaluation_profile','legacy')
     a.vio_max_frames=a.vio_max_frames if a.vio_max_frames is not None else (prior or {}).get('vio',{}).get('max_frames',0)
     if a.step=='report':
         from generate_pipeline_report import generate
@@ -126,12 +130,12 @@ def main():
     provenance=path/'provenance';provenance.mkdir()
     names=['run_vio_pipeline.py','vio_pipeline_common.py','pipeline_layout.py','basalt_run_data.py','convert_rig_to_okvis.py',
            'convert_okvis_trajectory.py','rig_calibration.py','capture_pipeline_common.py','interpolate_mocap_to_vio.py',
-           'extend_evo_stats.py','compare_vio_runs.py','generate_pipeline_report.py','audit_camera_models.cpp']
+           'extend_evo_stats.py','compare_vio_runs.py','poc_evaluation.py','poc_evaluation_origin.json','generate_pipeline_report.py','audit_camera_models.cpp']
     m['source_files']={}
     for name in names:
         source=ROOT/'scripts'/name;shutil.copy2(source,provenance/name);m['source_files'][name]=sha(source)
     shutil.copytree(ROOT/'scripts/vendor',provenance/'vendor')
-    m['environment']=dict(platform=platform.platform(),cpu_count=os.cpu_count(),python_packages={p:importlib.metadata.version(p) for p in ['numpy','Pillow','PyYAML','matplotlib','evo']})
+    m['environment']=dict(platform=platform.platform(),cpu_count=os.cpu_count(),python_packages={p:importlib.metadata.version(p) for p in ['numpy','Pillow','PyYAML','matplotlib','evo','scipy']})
     save();print(path,flush=True)
     def command(stage,argv,cwd=None):
         m['stages'][stage].setdefault('commands',[]).append([str(x) for x in argv]);save()
@@ -281,9 +285,13 @@ def main():
         summary['wall_realtime_factor']=wall/((last-first)/1e9) if last>first else None
         dump(d/'outputs/trajectory_summary.json',summary);m['vio']=summary
     def compare(d):
-        command('compare',[sys.executable,ROOT/'scripts/compare_vio_runs.py','--okvis',artifact(path,'trajectory'),
+        args=[sys.executable,ROOT/'scripts/compare_vio_runs.py','--okvis',artifact(path,'trajectory'),
             '--basalt',artifact(path,'basalt'),'--groundtruth',artifact(path,'gt'),'--output',d,
-            '--input-first-ns',json.loads(artifact(path,'vio_summary').read_text())['input_first_imu_ns']])
+            '--input-first-ns',json.loads(artifact(path,'vio_summary').read_text())['input_first_imu_ns'],
+            '--evaluation-profile',params['evaluation_profile']]
+        states=ref/'inputs/basalt_states.csv'
+        if states.is_file():args+=['--basalt-states',states]
+        command('compare',args)
         m['comparison']=json.loads(artifact(path,'comparison').read_text())
     try:
         if prior:

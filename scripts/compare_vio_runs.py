@@ -25,8 +25,14 @@ def main():
     p.add_argument('--start',type=__import__('decimal').Decimal,default=__import__('decimal').Decimal('0'))
     p.add_argument('--end',type=__import__('decimal').Decimal)
     p.add_argument('--show-gui',action='store_true')
+    p.add_argument('--evaluation-profile',choices=['legacy','static','motion'],default='legacy')
+    p.add_argument('--basalt-states',type=Path)
     a=p.parse_args()
     if not a.start.is_finite() or a.start<0 or (a.end is not None and (not a.end.is_finite() or a.end<=a.start)):p.error('Require 0 <= start < end')
+    if a.evaluation_profile!='legacy':
+        from poc_evaluation import compare
+        compare(a)
+        return
     a.output.mkdir(parents=True,exist_ok=True)
     for sub in ('inputs','logs','summary'):(a.output/sub).mkdir(exist_ok=True)
     effective=a.output/'inputs/evaluator_sources';effective.mkdir(exist_ok=True)

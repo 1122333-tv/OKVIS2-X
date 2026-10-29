@@ -137,6 +137,7 @@ def generate(run, automatic=False):
              '用户到运行':differences(template,effective) if template is not None and effective is not None else []}
     masks=compare_masks(run,m,sources,missing)
     sampling=m.get('sampling',{'deterministic':False,'seed':None,'scope':'visual_ransac_only'})
+    poc=comp.get('profile') in ('static','motion')
     data={'sampling':sampling,'run':str(run),'run_status':m['status'],'stages':m['stages'],'parameters':m['parameters'],'vio':vio,
           'comparison':comp,'reference':ref,'groundtruth':gt,'time_offset':offset,'configuration_changes':changes,'mask_comparison':masks,'missing':missing,
           'limits':['GT 原样导入；不再次应用时间偏移或外参。','未校验物理 IMU 坐标系或 marker–IMU 标定一致性。',
@@ -155,19 +156,24 @@ def generate(run, automatic=False):
         return '<table class="'+cls+'"><thead><tr>'+''.join('<th>'+e(h)+'</th>' for h in headers)+'</tr></thead><tbody>'+''.join('<tr>'+''.join('<td>'+e(v)+'</td>' for v in row)+'</tr>' for row in records)+'</tbody></table>'
     metric_names={'ape_translation':'APE 平移','rpe_translation_0.1m':'RPE 平移 · 0.1 m',
                   'rpe_translation_0.5m':'RPE 平移 · 0.5 m','rpe_translation_1m':'RPE 平移 · 1 m'}
+    metric_names['are_rotation']='ARE 旋转'
+    for delta in ('0.1s','1s','0.1m','0.5m','1m'):
+        metric_names['rpe_translation_'+delta]='RPE 平移 · '+delta
+        metric_names['rre_rotation_'+delta]='RRE 旋转 · '+delta
     algorithms={'okvis':'OKVIS2','basalt':'Basalt'}
     def metric_table(scope):
         records=comp.get(scope,{})
         keys=['rmse','mean','median','std','min','max','sse','n','p95','p99']
         extras=sorted({k for r in records.values() for s in r.get('metrics',{}).values() for k in s}-set(keys))
         keys+=extras
-        headers=['指标','算法']+[{'n':'样本数','sse':'SSE (m²)'}.get(k,k.upper()+' (m)' if k not in extras else k) for k in keys]
+        headers=['指标','算法','单位']+[{'n':'样本数','sse':'SSE（单位²）'}.get(k,k.upper() if k not in extras else k) for k in keys]
         rows=[]
         names=list(dict.fromkeys(k for r in records.values() for k in (*r.get('metrics',{}),*r.get('unavailable_metrics',{}))))
         for metric in names:
             for name,r in records.items():
                 s=r.get('metrics',{}).get(metric,{})
-                rows.append([metric_names.get(metric,metric),algorithms.get(name,name)]+[
+                unit=r.get('metric_units',{}).get(metric,'m')
+                rows.append([metric_names.get(metric,metric),algorithms.get(name,name),unit]+[
                     format(s[k],'.6g') if isinstance(s.get(k),float) else s.get(k,'—') for k in keys])
         return '<div class="table-scroll">'+table(headers,rows,'metrics')+'</div>'+file_block('完整精度指标、轨迹匹配统计及不可计算原因。',artifact(run,'comparison'),records,scope)
     images=[]
@@ -177,6 +183,8 @@ def generate(run, automatic=False):
         relative=str(p.relative_to(run)) if p.is_relative_to(run) else str(p);sources[relative]=sha(p)
         return '<figure><button class="zoom" type="button"><img alt="'+e(relative)+'" src="data:image/png;base64,'+base64.b64encode(p.read_bytes()).decode()+'"></button><figcaption>'+e(p.name)+'</figcaption></figure>'
     def paired_figures(scope):
+        if poc:
+            return '<p>同一图内比较双方，使用共享坐标轴；平移显示 cm，旋转显示 °；连续区间之间断线。</p>'+''.join(figure(p) for p in sorted((run/'04_vio_comparison').glob(scope+'_*.png')))
         root=run/'04_vio_comparison'/scope
         names=sorted({p.name for name in algorithms for p in (root/name).glob('*.png')})
         if not names:return '<p>暂无图表</p>'
@@ -199,7 +207,8 @@ def generate(run, automatic=False):
             ''.join('<h3>'+e(k)+'</h3>'+table(['字段','变化',*(['默认值','用户值'] if k=='默认到用户' else ['用户值','运行值'])],rows,'config') for k,rows in changes.items())+
             file_block('完整运行配置，包含相机标定、mask 路径、时间偏移和算法参数。',artifact(run,'config'),effective,raw=True))
     section('coverage','覆盖率与资源统计',file_block('VIO 输出帧数、缺帧、首尾覆盖、特征统计和运行资源汇总。',artifact(run,'vio_summary'),vio))
-    section('metrics','Common · APE / RPE','<p>在双方与 GT 均有效的共同时间戳上评测，各自进行 SE(3) 无尺度对齐。表内数值显示 6 位有效数字；完整精度见下方展开项。不可计算的指标显示 —。</p>'+metric_table('common'))
+    alignment=('静止：起始 1 s 平均位姿对齐。' if comp.get('profile')=='static' else '运动：整段位置 SE(3) 对齐。') if poc else '各自进行 SE(3) 对齐。'
+    section('metrics','Common · 位姿误差','<p>双方与 GT 均有效的共同时间戳；'+alignment+'均不拟合尺度。'+('RPE/RRE 帧对使用双方连续区间交集并核对端点一致。' if poc else '')+'表内数值显示 6 位有效数字；平移 m、旋转 deg。不可计算的指标显示 —。</p>'+metric_table('common'))
     section('figures','Common · 图表对比',paired_figures('common'))
     section('native','Native · 各自覆盖范围','<details><summary>展开 Native 指标与图表</summary><p>各算法使用自身与 GT 匹配的有效时间戳。</p>'+metric_table('native')+paired_figures('native')+'</details>')
     mask_status=('实际使用的 Mask 与 Basalt 默认 Mask 不同，已自动展开。' if masks['changed'] else
@@ -232,7 +241,7 @@ def generate(run, automatic=False):
         mask_body+='<details><summary>源 Mask 路径</summary><p class="file-path">Basalt：'+e(r['default_path'] or '—')+'</p><p class="file-path">OKVIS：'+e(r['actual_path'])+'</p></details></div>'
     mask_body+='</div></div>'
     section('masks','Mask',mask_body+'</details>')
-    section('diagnostics','对齐诊断',''.join(figure(p) for p in sorted((run/'04_vio_comparison').glob('*.png')))+file_block('对齐方式、评测时间范围、共同时间戳及对齐诊断。',artifact(run,'comparison'),{k:v for k,v in comp.items() if k not in ('native','common')},'除 native / common 外的字段'))
+    section('diagnostics','对齐诊断',('' if poc else ''.join(figure(p) for p in sorted((run/'04_vio_comparison').glob('*.png'))))+file_block('对齐方式、评测时间范围、共同时间戳及对齐诊断。',artifact(run,'comparison'),{k:v for k,v in comp.items() if k not in ('native','common')},'除 native / common 外的字段'))
     section('sources','来源与缺失项',file_block('导入参考文件的原始来源路径和 SHA-256。',run/'02_reference/inputs/sources.json',ref)+file_block('生成报告时未找到的输入文件清单；空列表表示未发现缺失。',run/'report/report_data.json',missing,'missing'))
     def safe(v):
         if isinstance(v,int) and not isinstance(v,bool) and abs(v)>2**53-1:return str(v)
