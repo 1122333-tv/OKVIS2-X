@@ -16,7 +16,6 @@ import sys
 import time
 import uuid
 import yaml
-from PIL import Image
 from convert_rig_to_okvis import convert, sha, write_yaml
 from convert_okvis_trajectory import load, write
 
@@ -26,6 +25,21 @@ from basalt_run_data import inspect, import_reference
 ROOT=Path(__file__).resolve().parents[1]
 def rows(p):
     with p.open() as f:return list(csv.reader(l for l in f if not l.startswith('#')))
+
+
+def read_basalt_image_groups(data):
+    """Validate existing camera CSV groups without accessing individual images."""
+    times=None;hashes={};image_count=0
+    for i in range(4):
+        name=f'cam{i}';index=data/name/'data.csv';records=rows(index)
+        for row in records:
+            if len(row)!=2 or not row[1] or Path(row[1]).is_absolute() or '..' in Path(row[1]).parts:
+                raise ValueError('Invalid image index')
+        ts=[int(row[0]) for row in records]
+        if not ts or any(y<=x for x,y in zip(ts,ts[1:])) or (times is not None and ts!=times):
+            raise ValueError('Invalid synchronized groups')
+        times=ts;hashes[name]=sha(index);image_count+=len(records)
+    return times,hashes,image_count
 
 
 def read_imu_support(binary):
@@ -201,22 +215,9 @@ def main():
         if effective!=info['offset']:raise ValueError('Delivery camera offset conflicts with prepared group timing')
         c['value0']['cam_time_offset_ns']=effective;dump(d/'outputs/calibration.json',c)
         conversion=convert(d/'outputs/calibration.json',d/'inputs/algorithm_template.yaml',d/'outputs/okvis2.yaml',d/'inputs/source_masks',params['imu_bias_policy'])
-        data=d/'outputs/dataset/mav0';times=None;count=0;hashes={}
-        for i in range(4):
-            name=f'cam{i}';cp=data/name;r=rows(cp/'data.csv');ts=[int(x[0]) for x in r]
-            if not ts or any(y<=x for x,y in zip(ts,ts[1:])) or (times is not None and ts!=times):raise ValueError('Invalid synchronized groups')
-            times=ts;hashes[name]=sha(cp/'data.csv')
-            def check_image(row):
-                if len(row)!=2 or Path(row[1]).is_absolute() or '..' in Path(row[1]).parts:raise ValueError('Invalid image index')
-                f=cp/'data'/row[1]
-                if not f.is_file():raise ValueError('Missing image '+str(f))
-                with Image.open(f) as im:
-                    if list(im.size)!=c['value0']['resolution'][i]:raise ValueError('Image resolution mismatch')
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=16) as pool:
-                for _ in pool.map(check_image,r):
-                    count+=1
-                    if count%1200==0:print(f'Checked {count} images',flush=True)
+        data=d/'outputs/dataset/mav0'
+        times,hashes,image_count=read_basalt_image_groups(data)
+        print(f'Reusing Basalt image groups; per-image checks skipped ({image_count} referenced images)',flush=True)
         ir=rows(data/'imu0/data.csv');it=[int(x[0]) for x in ir]
         if not it or any(y<=x for x,y in zip(it,it[1:])) or any(len(r)!=7 or not all(__import__('math').isfinite(float(v)) for v in r[1:]) for r in ir):raise ValueError('Invalid IMU samples')
         hashes['imu0']=sha(data/'imu0/data.csv')
@@ -226,9 +227,13 @@ def main():
              first_required_before_ns=times[0]+effective-support_ns,
              last_required_at_or_after_ns=times[-1]+effective+support_ns))
         models=audit_models(d/'outputs/okvis2.yaml',d/'inputs/source_masks',d/'diagnostics')
-        m['preparation']=dict(groups=len(times),images_checked=count,index_sha256=hashes,prepared_dataset=str(info['dataset']),
+        m['preparation']=dict(groups=len(times),images_checked=0,images_referenced=image_count,
+             image_validation=dict(status='skipped',reason='Reusing completed Basalt prepared dataset',
+                 source_preparation=str(info['preparation_file']),source_preparation_sha256=sha(info['preparation_file']),
+                 scope='Camera CSV paths, timestamps and hashes checked; individual image files not inspected'),
+             index_sha256=hashes,prepared_dataset=str(info['dataset']),
              first_camera_timestamp_ns=times[0],last_camera_timestamp_ns=times[-1],cam_time_offset_ns=effective,
-             conversion=conversion,models=models,image_content_checksums='Not recomputed; existence and dimensions checked')
+             conversion=conversion,models=models,image_content_checksums='Not recomputed; per-image checks skipped for Basalt run')
         dump(d/'outputs/preparation.json',m['preparation'])
     def reference(d):
         import_reference(info,d/'inputs')

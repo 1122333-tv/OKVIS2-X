@@ -89,3 +89,34 @@ class ImuSupportBoundaries(unittest.TestCase):
                 for samples in ([first,last],[first-1,last-1]):
                     with self.assertRaisesRegex(ValueError,'Insufficient IMU support'):
                         validate_imu_support(samples,[100000000,200000000],offset,20000000)
+
+
+class BasaltImageGroups(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.data=Path(self.tmp.name)
+        for i in range(4):
+            camera=self.data/f'cam{i}';camera.mkdir()
+            # The referenced image directory does not exist: no image I/O is allowed here.
+            (camera/'data.csv').write_text('#timestamp [ns],filename\n100000000,missing.jpg\n200000000,nested/image.jpg\n')
+
+    def test_reuses_existing_groups_without_image_access(self):
+        from unittest.mock import patch
+        from vio_pipeline_common import read_basalt_image_groups
+        with patch.object(Path,'is_file',side_effect=AssertionError('Unexpected file existence check')), \
+             patch('PIL.Image.open',side_effect=AssertionError('Unexpected image open')):
+            times,hashes,count=read_basalt_image_groups(self.data)
+        self.assertEqual(times,[100000000,200000000]);self.assertEqual(count,8)
+        self.assertEqual(hashes,{f'cam{i}':sha(self.data/f'cam{i}/data.csv') for i in range(4)})
+
+    def test_still_rejects_bad_indices_and_grouping(self):
+        from vio_pipeline_common import read_basalt_image_groups
+        for text in ['100000000,../escape.jpg\n','100000000,/absolute.jpg\n',
+                     '100000000,\n','100000000,image.jpg,extra\n',
+                     '200000000,a.jpg\n100000000,b.jpg\n',
+                     '100000000,a.jpg\n100000000,b.jpg\n',
+                     '100000001,a.jpg\n200000000,b.jpg\n','']:
+            with self.subTest(text=text):
+                (self.data/'cam3/data.csv').write_text(text)
+                with self.assertRaisesRegex(ValueError,'Invalid image index|Invalid synchronized groups'):
+                    read_basalt_image_groups(self.data)
