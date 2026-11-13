@@ -50,6 +50,8 @@ def import_reference(info, target):
     target=Path(target);target.mkdir(parents=True,exist_ok=True)
     files={info['root']/'manifest.yaml':'basalt_manifest.yaml',info['preparation_file']:'preparation.json',
            info['gt']:'groundtruth/data.csv',info['conversion']:'groundtruth/conversion.json',info['trajectory']:'basalt_trajectory.csv'}
+    states=info['trajectory'].with_name('states.csv')
+    if states.is_file():files[states]='basalt_states.csv'
     for name in ('total_offset.json','time_alignment.json'):
         for sub in ('time_alignment','outputs/time_alignment'):
             p=info['gt_stage']/sub/name

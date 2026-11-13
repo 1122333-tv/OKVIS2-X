@@ -20,6 +20,7 @@
 #ifndef INCLUDE_OKVIS_FRONTEND_HPP_
 #define INCLUDE_OKVIS_FRONTEND_HPP_
 
+#include <okvis/VisualRecovery.hpp>
 #include <mutex>
 
 #include <okvis/Component.hpp>
@@ -387,7 +388,8 @@ private:
                     const okvis::cameras::NCameraSystem &nCameraSystem,
                     std::shared_ptr<okvis::MultiFrame> currentFrame,
                     bool initializePose,
-                    bool removeOutliers);
+                    bool removeOutliers,
+                    detail::RecoveryEvidence* recoveryEvidence = nullptr);
   /**
    * @brief Remove outliers on current frame.
    * @warning As this function uses the estimator it is not threadsafe.

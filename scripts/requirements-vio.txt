@@ -4,6 +4,7 @@ Pillow==12.3.0
 PyYAML==6.0.3
 matplotlib==3.11.1
 evo==1.37.0
+scipy==1.18.1
 
 # Optional interactive evo GUI backend
 PyQt6==6.11.0

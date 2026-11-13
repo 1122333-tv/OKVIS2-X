@@ -1,0 +1,93 @@
+# Reproducible recovery preset: use with --deterministic 1.
+# Serial detection, one matching thread and one realtime solver thread.
+# Extracted from the validated 2026-09-30 candidate; GUI replay matched on 2026-10-08.
+# Physical rig and image_delay are injected by run_vio_pipeline.py from --calibration-dir.
+# Recovery is a mitigation, not a complete drift fix. See doc/dev/vio_drift_reproducible_report.md.
+camera_parameters:
+  timestamp_tolerance: 0.005
+  sync_cameras:
+  - 0
+  - 1
+  - 2
+  - 3
+  image_delay: 0.0
+  online_calibration:
+    do_extrinsics: false
+    do_extrinsics_final_ba: false
+    sigma_r: 0.01
+    sigma_alpha: 0.1
+    sigma_r_final_ba: 0.03
+    sigma_alpha_final_ba: 0.3
+  fov_scale: 1.0
+imu_parameters:
+  use: true
+  a_max: 160.0
+  g_max: 10.0
+  sigma_g_c: 0.000282
+  sigma_a_c: 0.016
+  sigma_bg: 0.01
+  sigma_ba: 0.1
+  sigma_gw_c: 0.0001
+  sigma_aw_c: 0.001
+  g: 9.81
+  g0:
+  - 0.0
+  - 0.0
+  - 0.0
+  a0:
+  - 0.0
+  - 0.0
+  - 0.0
+  s_a:
+  - 1.0
+  - 1.0
+  - 1.0
+  T_BS:
+  - 1.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+  huber_loss_scale: 5.0
+frontend_parameters:
+  detection_threshold: 30.0
+  absolute_threshold: 20.0
+  matching_threshold: 60.0
+  octaves: 0
+  max_num_keypoints: 1000
+  keyframe_overlap: 0.6
+  use_cnn: false
+  parallelise_detection: false
+  num_matching_threads: 1
+  visual_recovery: true
+estimator_parameters:
+  num_keyframes: 5
+  num_loop_closure_frames: 3
+  num_imu_frames: 3
+  do_loop_closures: false
+  do_final_ba: false
+  enforce_realtime: false
+  realtime_min_iterations: 3
+  realtime_max_iterations: 10
+  realtime_time_limit: 0.035
+  realtime_num_threads: 1
+  full_graph_iterations: 15
+  full_graph_num_threads: 3
+  p_dbow: 0.4
+  drift_percentage_heuristic: 1.35
+output_parameters:
+  display_topview: false
+  display_matches: false
+  display_overhead: false
+  enable_submapping: false

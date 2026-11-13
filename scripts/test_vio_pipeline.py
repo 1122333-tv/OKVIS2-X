@@ -43,6 +43,23 @@ class Contracts(unittest.TestCase):
     def test_anisotropic_noise_is_rejected(self):
         self.c['accel_noise_std'][0]=.02
         with self.assertRaises(ValueError):self.conversion()
+    def test_raw_imu_zero_prior_policy_preserves_source_and_rejects_scale(self):
+        self.c['calib_accel_bias'][:3]=[.01,.02,-.03]
+        self.c['calib_gyro_bias'][:3]=[.001,-.002,.003]
+        p=self.d/'cal.json';p.write_text(json.dumps({'value0':self.c}));before=p.read_bytes()
+        template=yaml.safe_load((ROOT/'config/oak4p/layout0916_vio.yaml').read_text())
+        template['imu_parameters'].update(a0=[1,2,3],g0=[4,5,6],s_a=[2,2,2])
+        t=self.d/'template.yaml';t.write_text(yaml.safe_dump(template))
+        r=convert(p,t,self.d/'out/okvis.yaml',self.d,'estimate-from-zero')
+        o=yaml.safe_load('\n'.join((self.d/'out/okvis.yaml').read_text().splitlines()[1:]))
+        self.assertEqual(o['imu_parameters']['a0'],[0,0,0]);self.assertEqual(o['imu_parameters']['g0'],[0,0,0])
+        self.assertEqual(o['imu_parameters']['s_a'],[1,1,1]);self.assertEqual(p.read_bytes(),before)
+        self.assertFalse(r['imu_correction']['fixed_bias_applied'])
+        self.assertEqual(r['imu_correction']['source_accel'],self.c['calib_accel_bias'])
+        for key in ('calib_accel_bias','calib_gyro_bias'):
+            c=copy.deepcopy(self.c);c[key][3]=1e-6;p.write_text(json.dumps({'value0':c}))
+            with self.assertRaisesRegex(ValueError,'scale/misalignment'):
+                convert(p,t,self.d/'out/okvis.yaml',self.d,'estimate-from-zero')
     def test_exact_large_timestamp_and_quaternion_order(self):
         t=1789539918207227402;p=self.d/'raw.csv';p.write_text(f'timestamp,px,py,pz,qx,qy,qz,qw\n{t},1,2,3,0,0,0,1\n')
         write(load(p),self.d/'normalized')
@@ -72,3 +89,34 @@ class ImuSupportBoundaries(unittest.TestCase):
                 for samples in ([first,last],[first-1,last-1]):
                     with self.assertRaisesRegex(ValueError,'Insufficient IMU support'):
                         validate_imu_support(samples,[100000000,200000000],offset,20000000)
+
+
+class BasaltImageGroups(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.data=Path(self.tmp.name)
+        for i in range(4):
+            camera=self.data/f'cam{i}';camera.mkdir()
+            # The referenced image directory does not exist: no image I/O is allowed here.
+            (camera/'data.csv').write_text('#timestamp [ns],filename\n100000000,missing.jpg\n200000000,nested/image.jpg\n')
+
+    def test_reuses_existing_groups_without_image_access(self):
+        from unittest.mock import patch
+        from vio_pipeline_common import read_basalt_image_groups
+        with patch.object(Path,'is_file',side_effect=AssertionError('Unexpected file existence check')), \
+             patch('PIL.Image.open',side_effect=AssertionError('Unexpected image open')):
+            times,hashes,count=read_basalt_image_groups(self.data)
+        self.assertEqual(times,[100000000,200000000]);self.assertEqual(count,8)
+        self.assertEqual(hashes,{f'cam{i}':sha(self.data/f'cam{i}/data.csv') for i in range(4)})
+
+    def test_still_rejects_bad_indices_and_grouping(self):
+        from vio_pipeline_common import read_basalt_image_groups
+        for text in ['100000000,../escape.jpg\n','100000000,/absolute.jpg\n',
+                     '100000000,\n','100000000,image.jpg,extra\n',
+                     '200000000,a.jpg\n100000000,b.jpg\n',
+                     '100000000,a.jpg\n100000000,b.jpg\n',
+                     '100000001,a.jpg\n200000000,b.jpg\n','']:
+            with self.subTest(text=text):
+                (self.data/'cam3/data.csv').write_text(text)
+                with self.assertRaisesRegex(ValueError,'Invalid image index|Invalid synchronized groups'):
+                    read_basalt_image_groups(self.data)

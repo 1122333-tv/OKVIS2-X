@@ -808,7 +808,7 @@ protected:
     std::vector<::ceres::ResidualBlockId> mapResIds;
     std::vector<SubmapAlignmentFactor> submapReferenceLinks;
     std::vector<SubmapAlignmentFactor> submapLinks;
-    size_t gpsMode; ///< Status of GPS (Re-)Initialization.
+    size_t gpsMode = gpsStatus::Off; ///< Status of GPS (Re-)Initialization; defined in pure VIO too.
 
     // attributes
     bool isKeyframe = false; ///< Is it a keyframe?
@@ -878,6 +878,11 @@ protected:
 
   // loss function for reprojection errors
   std::shared_ptr< ::ceres::LossFunction> cauchyLossFunctionPtr_; ///< Cauchy loss.
+  std::shared_ptr< ::ceres::LossFunction> imuLossFunctionPtr_; ///< Optional IMU Huber loss.
+  /// Use the same policy when propagating, cloning and merging IMU links.
+  ::ceres::LossFunction* imuLossFunction() const {
+    return imuLossFunctionPtr_.get();
+  }
   std::shared_ptr< ::ceres::LossFunction> cauchyGpsLossFunctionPtr_; ///< Cauchy loss for GPS.
   std::shared_ptr< ::ceres::LossFunction> huberLossFunctionPtr_; ///< Huber loss.
   std::shared_ptr< ::ceres::LossFunction> tukeyDepthLossFunctionPtr_; ///< Tukey loss for Depth.

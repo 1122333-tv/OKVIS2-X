@@ -1,0 +1,10 @@
+{
+  "source": "basalt-monado/scripts/evaluate_poc_trajectory.py",
+  "sha256": "ad09a2301f08e47ef356671250595f109af0d8c6d0c73e7c382b2a5c2dddf4cd",
+  "adapted": "alignment, statistics, timestamp pairs and segment boundaries; local paired evaluation and report output",
+  "sparse_sampling_adaptation": {
+    "source": "basalt-monado/scripts/interpolate_mocap_to_vio.py",
+    "sha256": "5c612ef3ac6fbb0d5d33561db80130f216e801b78dc86048d2fb86a5c291371a",
+    "policy": "Local copy of sample_at_mocap; local paired evaluator with measured-GT common timestamps, output gaps, no distance metrics"
+  }
+}

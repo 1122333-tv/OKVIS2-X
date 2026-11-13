@@ -266,6 +266,9 @@ int ViGraph::addImu(const ImuParameters& imuParameters) {
     return -1;
   }
   imuParametersVec_.push_back(imuParameters);
+  if (imuParameters.use && imuParameters.huber_loss_scale > 0.0) {
+    imuLossFunctionPtr_.reset(new ::ceres::HuberLoss(imuParameters.huber_loss_scale));
+  }
   return static_cast<int>(imuParametersVec_.size()) - 1;
 }
 
@@ -458,7 +461,7 @@ StateId ViGraph::addStatesPropagate(const Time &timestamp,
   }
   // add to ceres
   imuLink.residualBlockId = problem_->AddResidualBlock(
-    imuLink.errorTerm.get(), nullptr,
+    imuLink.errorTerm.get(), imuLossFunction(),
     lastState.pose->parameters(), lastState.speedAndBias->parameters(),
     state.pose->parameters(), state.speedAndBias->parameters());
 
@@ -559,7 +562,7 @@ bool ViGraph::addStatesFromOther(StateId stateId, const ViGraph &other)
     ImuLink imuLink;
     imuLink.errorTerm = otherState.previousImuLink.errorTerm->clone();
     imuLink.residualBlockId = problem_->AddResidualBlock(
-          imuLink.errorTerm.get(), nullptr,
+          imuLink.errorTerm.get(), imuLossFunction(),
           previousState.pose->parameters(), previousState.speedAndBias->parameters(),
           state.pose->parameters(), state.speedAndBias->parameters());
     state.previousImuLink = imuLink;

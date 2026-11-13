@@ -16,7 +16,6 @@ import sys
 import time
 import uuid
 import yaml
-from PIL import Image
 from convert_rig_to_okvis import convert, sha, write_yaml
 from convert_okvis_trajectory import load, write
 
@@ -26,6 +25,21 @@ from basalt_run_data import inspect, import_reference
 ROOT=Path(__file__).resolve().parents[1]
 def rows(p):
     with p.open() as f:return list(csv.reader(l for l in f if not l.startswith('#')))
+
+
+def read_basalt_image_groups(data):
+    """Validate existing camera CSV groups without accessing individual images."""
+    times=None;hashes={};image_count=0
+    for i in range(4):
+        name=f'cam{i}';index=data/name/'data.csv';records=rows(index)
+        for row in records:
+            if len(row)!=2 or not row[1] or Path(row[1]).is_absolute() or '..' in Path(row[1]).parts:
+                raise ValueError('Invalid image index')
+        ts=[int(row[0]) for row in records]
+        if not ts or any(y<=x for x,y in zip(ts,ts[1:])) or (times is not None and ts!=times):
+            raise ValueError('Invalid synchronized groups')
+        times=ts;hashes[name]=sha(index);image_count+=len(records)
+    return times,hashes,image_count
 
 
 def read_imu_support(binary):
@@ -90,6 +104,9 @@ def main():
     ap.add_argument('--evo-show-gui',action='store_true',help='Open evo metric and trajectory windows')
     ap.add_argument('--vio-max-frames',type=int,default=None)
     ap.add_argument('--binary',type=Path,default=ROOT/'build-vio/okvis_app_synchronous')
+    ap.add_argument('--imu-bias-policy',choices=['require-zero','estimate-from-zero'])
+    ap.add_argument('--evaluation-profile',choices=['legacy','static','motion'])
+    ap.add_argument('--evaluation-sampling',choices=['vio','mocap'])
     add_sampling_argument(ap)
     a=ap.parse_args()
     if a.vio_max_frames is not None and a.vio_max_frames<0:ap.error('Frame limit must be nonnegative')
@@ -98,7 +115,7 @@ def main():
         ap.error('--deterministic is a VIO execution option; cannot relabel an existing trajectory')
     if prior:
         a.from_run=a.from_run.resolve()
-        if any((a.basalt_run,a.calibration_dir,a.config,a.camera_mask_dir)):ap.error('Reuse takes frozen inputs; do not override input parameters')
+        if any((a.basalt_run,a.calibration_dir,a.config,a.camera_mask_dir,a.imu_bias_policy)):ap.error('Reuse takes frozen inputs; do not override input parameters')
         params=prior['parameters'].copy()
     else:
         if not a.basalt_run or not a.calibration_dir:ap.error('--basalt-run and --calibration-dir required')
@@ -108,6 +125,12 @@ def main():
         info=inspect(a.basalt_run,a.camera_mask_dir)
         params=dict(basalt_run=str(a.basalt_run),calibration_dir=str(a.calibration_dir),config=str(a.config),
                     config_sha256=sha(a.config),dataset=info['dataset_identity'],prepared_dataset=str(info['dataset']))
+        params['imu_bias_policy']=a.imu_bias_policy or 'require-zero'
+    if a.step=='report' and (a.evaluation_profile is not None or a.evaluation_sampling is not None):
+        ap.error('Report cannot relabel an existing evaluation')
+    params['evaluation_profile']=a.evaluation_profile or params.get('evaluation_profile','legacy')
+    params['evaluation_sampling']=a.evaluation_sampling or params.get('evaluation_sampling','vio')
+    if params['evaluation_sampling']=='mocap' and params['evaluation_profile']=='legacy':ap.error('Mocap sampling requires static or motion profile')
     a.vio_max_frames=a.vio_max_frames if a.vio_max_frames is not None else (prior or {}).get('vio',{}).get('max_frames',0)
     if a.step=='report':
         from generate_pipeline_report import generate
@@ -124,12 +147,12 @@ def main():
     provenance=path/'provenance';provenance.mkdir()
     names=['run_vio_pipeline.py','vio_pipeline_common.py','pipeline_layout.py','basalt_run_data.py','convert_rig_to_okvis.py',
            'convert_okvis_trajectory.py','rig_calibration.py','capture_pipeline_common.py','interpolate_mocap_to_vio.py',
-           'extend_evo_stats.py','compare_vio_runs.py','generate_pipeline_report.py','audit_camera_models.cpp']
+           'extend_evo_stats.py','compare_vio_runs.py','poc_evaluation.py','poc_evaluation_origin.json','generate_pipeline_report.py','audit_camera_models.cpp']
     m['source_files']={}
     for name in names:
         source=ROOT/'scripts'/name;shutil.copy2(source,provenance/name);m['source_files'][name]=sha(source)
     shutil.copytree(ROOT/'scripts/vendor',provenance/'vendor')
-    m['environment']=dict(platform=platform.platform(),cpu_count=os.cpu_count(),python_packages={p:importlib.metadata.version(p) for p in ['numpy','Pillow','PyYAML','matplotlib','evo']})
+    m['environment']=dict(platform=platform.platform(),cpu_count=os.cpu_count(),python_packages={p:importlib.metadata.version(p) for p in ['numpy','Pillow','PyYAML','matplotlib','evo','scipy']})
     save();print(path,flush=True)
     def command(stage,argv,cwd=None):
         m['stages'][stage].setdefault('commands',[]).append([str(x) for x in argv]);save()
@@ -194,23 +217,10 @@ def main():
         effective=c['value0']['cam_time_offset_ns']+adjustment
         if effective!=info['offset']:raise ValueError('Delivery camera offset conflicts with prepared group timing')
         c['value0']['cam_time_offset_ns']=effective;dump(d/'outputs/calibration.json',c)
-        conversion=convert(d/'outputs/calibration.json',d/'inputs/algorithm_template.yaml',d/'outputs/okvis2.yaml',d/'inputs/source_masks')
-        data=d/'outputs/dataset/mav0';times=None;count=0;hashes={}
-        for i in range(4):
-            name=f'cam{i}';cp=data/name;r=rows(cp/'data.csv');ts=[int(x[0]) for x in r]
-            if not ts or any(y<=x for x,y in zip(ts,ts[1:])) or (times is not None and ts!=times):raise ValueError('Invalid synchronized groups')
-            times=ts;hashes[name]=sha(cp/'data.csv')
-            def check_image(row):
-                if len(row)!=2 or Path(row[1]).is_absolute() or '..' in Path(row[1]).parts:raise ValueError('Invalid image index')
-                f=cp/'data'/row[1]
-                if not f.is_file():raise ValueError('Missing image '+str(f))
-                with Image.open(f) as im:
-                    if list(im.size)!=c['value0']['resolution'][i]:raise ValueError('Image resolution mismatch')
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=16) as pool:
-                for _ in pool.map(check_image,r):
-                    count+=1
-                    if count%1200==0:print(f'Checked {count} images',flush=True)
+        conversion=convert(d/'outputs/calibration.json',d/'inputs/algorithm_template.yaml',d/'outputs/okvis2.yaml',d/'inputs/source_masks',params['imu_bias_policy'])
+        data=d/'outputs/dataset/mav0'
+        times,hashes,image_count=read_basalt_image_groups(data)
+        print(f'Reusing Basalt image groups; per-image checks skipped ({image_count} referenced images)',flush=True)
         ir=rows(data/'imu0/data.csv');it=[int(x[0]) for x in ir]
         if not it or any(y<=x for x,y in zip(it,it[1:])) or any(len(r)!=7 or not all(__import__('math').isfinite(float(v)) for v in r[1:]) for r in ir):raise ValueError('Invalid IMU samples')
         hashes['imu0']=sha(data/'imu0/data.csv')
@@ -220,9 +230,13 @@ def main():
              first_required_before_ns=times[0]+effective-support_ns,
              last_required_at_or_after_ns=times[-1]+effective+support_ns))
         models=audit_models(d/'outputs/okvis2.yaml',d/'inputs/source_masks',d/'diagnostics')
-        m['preparation']=dict(groups=len(times),images_checked=count,index_sha256=hashes,prepared_dataset=str(info['dataset']),
+        m['preparation']=dict(groups=len(times),images_checked=0,images_referenced=image_count,
+             image_validation=dict(status='skipped',reason='Reusing completed Basalt prepared dataset',
+                 source_preparation=str(info['preparation_file']),source_preparation_sha256=sha(info['preparation_file']),
+                 scope='Camera CSV paths, timestamps and hashes checked; individual image files not inspected'),
+             index_sha256=hashes,prepared_dataset=str(info['dataset']),
              first_camera_timestamp_ns=times[0],last_camera_timestamp_ns=times[-1],cam_time_offset_ns=effective,
-             conversion=conversion,models=models,image_content_checksums='Not recomputed; existence and dimensions checked')
+             conversion=conversion,models=models,image_content_checksums='Not recomputed; per-image checks skipped for Basalt run')
         dump(d/'outputs/preparation.json',m['preparation'])
     def reference(d):
         import_reference(info,d/'inputs')
@@ -279,9 +293,13 @@ def main():
         summary['wall_realtime_factor']=wall/((last-first)/1e9) if last>first else None
         dump(d/'outputs/trajectory_summary.json',summary);m['vio']=summary
     def compare(d):
-        command('compare',[sys.executable,ROOT/'scripts/compare_vio_runs.py','--okvis',artifact(path,'trajectory'),
+        args=[sys.executable,ROOT/'scripts/compare_vio_runs.py','--okvis',artifact(path,'trajectory'),
             '--basalt',artifact(path,'basalt'),'--groundtruth',artifact(path,'gt'),'--output',d,
-            '--input-first-ns',json.loads(artifact(path,'vio_summary').read_text())['input_first_imu_ns']])
+            '--input-first-ns',json.loads(artifact(path,'vio_summary').read_text())['input_first_imu_ns'],
+            '--evaluation-profile',params['evaluation_profile'],'--evaluation-sampling',params['evaluation_sampling']]
+        states=ref/'inputs/basalt_states.csv'
+        if states.is_file():args+=['--basalt-states',states]
+        command('compare',args)
         m['comparison']=json.loads(artifact(path,'comparison').read_text())
     try:
         if prior:

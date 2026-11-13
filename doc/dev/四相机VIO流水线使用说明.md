@@ -1,6 +1,6 @@
 # 四相机 VIO 流水线使用说明
 
-更新：2026-09-22。适用 OKVIS run 格式 `okvis-vio` / version 2。旧 OKVIS run 不兼容、不迁移；历史验证文档仅供查阅。
+更新：2026-10-08。适用 OKVIS run 格式 `okvis-vio` / version 2。旧 OKVIS run 不兼容、不迁移；历史验证文档仅供查阅。
 
 ## 输入与运行边界
 
@@ -26,15 +26,17 @@ cd /home/yuewang/Project/VSLAM/four_fisheye_rig/OKVIS2-X
 ./scripts/test_vio.sh
 ```
 
-本机 Python 为 `/home/yuewang/.local/share/pipx/venvs/evo/bin/python`，依赖版本见 `scripts/requirements-vio.txt`。便捷脚本允许通过 `PYTHON_BIN` 指定其它具备这些依赖的解释器。evo CLI 使用同一 Python 环境，GUI 需要 QtAgg/PyQt6 及可用图形桌面。C++ 相机有效域检查使用本工程头文件、系统 Eigen/OpenCV 编译。
+本机 Python 为 `/home/yuewang/.local/share/pipx/venvs/evo/bin/python`，依赖版本见 `scripts/requirements-vio.txt`。统一使用该解释器直接调用 `scripts/run_vio_pipeline.py`；其它机器需选择具备这些依赖的解释器。evo CLI 使用同一 Python 环境，GUI 需要 QtAgg/PyQt6 及可用图形桌面。C++ 相机有效域检查使用本工程头文件、系统 Eigen/OpenCV 编译。
 
 ## 完整运行
 
 Layout0916 示例：
 
 ```bash
-./scripts/run_layout0916_vio.sh \
+/home/yuewang/.local/share/pipx/venvs/evo/bin/python scripts/run_vio_pipeline.py \
   --basalt-run /home/yuewang/Project/VSLAM/four_fisheye_rig/basalt-monado/results/20260916_142602_203941_DOHC2_validation_01/run_20260918T151707_4586ee \
+  --calibration-dir /home/yuewang/Project/Calib/calibration_workspace/runs/layout0916_DOHC2_joint_dynamic_01_retry01/delivery/vio/kalibr_handeye \
+  --config config/oak4p/layout0916_vio.yaml \
   --step all --run-name baseline
 ```
 
