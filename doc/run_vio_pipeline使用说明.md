@@ -141,7 +141,7 @@ Layout0916 两次均输出 2402 帧、共同评估 2401 帧；Layout0921 均输�
 
 ## ⚙️ 全部命令行参数
 
-共 **16 项选项**，包含帮助，别名合并计数。下表默认值指新运行。
+共 **17 项选项**，包含帮助，别名合并计数。下表默认值指新运行。
 
 | 参数 | 含义 | 默认值与限制 |
 | --- | --- | --- |
@@ -160,9 +160,22 @@ Layout0916 两次均输出 2402 帧、共同评估 2401 帧；Layout0921 均输�
 | `--binary` | OKVIS 可执行文件 | 仓库 `build-vio/okvis_app_synchronous`；不从旧 run 继承；其目录还需匹配的 `CMakeCache.txt` 和词袋文件 |
 | `--deterministic [0\|1]` | 固定视觉 RANSAC 采样种子为 12345 | 新运行默认关闭；单独传开关或传 `1` 开启，`0` 关闭；复用时未指定则继承。只控制采样，不改变线程；`compare`/`report` 不接受 |
 | `--imu-bias-policy` | 固定 IMU 标定的输入处理策略 | `require-zero`（默认）或 `estimate-from-zero`；后者将 a0/g0 设零、s_a 设一，原始 IMU 不扣 bias，在线状态估计总偏置；从旧 run 复用时禁止覆盖 |
+| `--evaluation-sampling` | 评估时间戳来源 | `vio`（默认）或 `mocap`；后者只用实测 GT，估计轨迹插值；复用时默认继承 |
 | `--evaluation-profile` | 对齐和评测指标口径 | `legacy`（新运行默认）、`static` 或 `motion`；复用时默认继承，可用 `--step compare` 重算，但 `report` 不允许改标签 |
 
 `--show-gui`、`--evo-show-gui` 不附加数值；`--deterministic` 可带 `0` 或 `1`，不接受 `true`/`false`。本入口不接受 `--run-id`、`--save-times`、`--start-time`、`--reference-camera`、`--max-offset`、`--stereo-debug` 或任意 C++ 参数透传。
+
+## 📍 低频 Mocap 的实测时刻评估
+
+当 Basalt 源 run 使用 `--evaluation-sampling mocap` 时，OKVIS 新运行也显式指定 `--evaluation-profile motion --evaluation-sampling mocap`。不改变图片、IMU 或已冻结的 Mocap 时移。
+
+- `vio` 为默认采样：将有效连续段的 GT 插值到 VIO 输出时刻，保持历史流程。
+- `mocap` 只保留实际测量位姿；仅对估计轨迹做位置线性插值和旋转 SLERP，最大输出括号跨度 50 ms，禁止外推和跨可用 reset。
+- Common 使用双方共同有效实测时刻和连续区间边界的并集，核对逐指标帧对及 GT 一致。GT 间隔超过 1 s、输出缺口超过 50 ms 或可用 reset 时，禁止跨界 RPE/RRE 配对。
+- 0.1 s 和 1 s 时间指标沿用 ±10% 容差。稀疏 Mocap 无法提供区间实际路程，距离型指标为 N/A。
+- 不同时间段的测量密度不同，总体统计按实测样本等权，不能解释为等时间权重。OKVIS 没有显式 reset 事件流，报告只检查其输出缺口。
+
+新选项也可用于 `--from-run ... --step compare`，不需要重跑 VIO；`--step report` 不允许改变采样标签。`mocap` 仅支持 `static`/`motion` profile。
 
 ## 🔀 阶段选择与复用规则
 

@@ -16,7 +16,7 @@ from scipy.spatial.transform import Rotation
 from evo.core import filters, metrics, result
 from evo.tools import file_interface
 from capture_pipeline_common import ns_seconds
-from interpolate_mocap_to_vio import interpolate
+from interpolate_mocap_to_vio import interpolate, sample_at_mocap
 import hashlib
 import shutil
 from convert_okvis_trajectory import load, write
@@ -56,24 +56,27 @@ def time_pairs(ts,delta,tolerance=.1):
     return out
 
 
-def segment_labels(ts,groundtruth,states=None):
+def segment_labels(ts,groundtruth,states=None,sampling='vio',output_times=None):
     """Never form relative pairs across GT holes, missing output or state resets."""
     labels=np.zeros(len(ts),dtype=int)
     conv=groundtruth.with_name('conversion.json')
-    spans=json.loads(conv.read_text()).get('valid_segments_ns',[]) if conv.exists() else []
+    span_key='measurement_segments_ns' if sampling=='mocap' else 'valid_segments_ns'
+    spans=json.loads(conv.read_text()).get(span_key,[]) if conv.exists() else []
     gt_labels=[]
     for t in ts:
         matches=[i for i,(a,b) in enumerate(spans) if a<=int(t)<=b]
         gt_labels.append(matches[0] if matches else -1)
     dt=np.diff(ts);nominal=int(np.median(dt)) if len(dt) else 0
     resets=[]
+    output_breaks=[int(b) for a,b in zip(output_times,output_times[1:]) if b-a>50_000_000] if sampling=='mocap' and output_times is not None else []
     if states and states.is_file():
         with states.open() as f:
             for r in csv.DictReader(f):
                 if int(r.get('state_reset','0')):resets.append(int(r['timestamp_ns']))
     for i in range(1,len(ts)):
-        split=(int(ts[i]-ts[i-1])>1.8*nominal or
+        split=(int(ts[i]-ts[i-1])>(1_000_000_000 if sampling=='mocap' else 1.8*nominal) or
                (bool(spans) and gt_labels[i]!=gt_labels[i-1]) or
+               any(int(ts[i-1])<r<=int(ts[i]) for r in output_breaks) or
                any(int(ts[i-1])<r<=int(ts[i]) for r in resets))
         labels[i]=labels[i-1]+int(split)
     return labels
@@ -103,7 +106,7 @@ def metric_dir(name):
     return Path(family)/delta
 
 
-def evaluate_matched(folder, profile, labels):
+def evaluate_matched(folder, profile, labels, sampling='vio'):
     """Evaluate already paired trajectories; all associations remain integer ns."""
     gt_file=folder/'mocap_at_vio.tum';est_file=folder/'vio_matched.tum'
     ts=timestamps(gt_file)
@@ -119,7 +122,7 @@ def evaluate_matched(folder, profile, labels):
             f.write(tum_time(int(t))+' '+' '.join(format(x,'.17g') for x in [*p,*q[1:],q[0]])+'\n')
     out=dict(alignment=alignment,metrics={},metric_units={},metric_records={},unavailable_metrics={},
              pairing=dict(segment_count=int(labels[-1]+1),
-                          exclusions='GT invalid segments, output gaps >1.8 median periods, available state-reset events'))
+                          exclusions=('Measured GT only; GT gaps >1 s, output gaps >50 ms, available reset events' if sampling=='mocap' else 'GT invalid segments, output gaps >1.8 median periods, available state-reset events')))
     def emit(name,errors,unit,pairs,eligible=None):
         errors=np.asarray(errors,dtype=float);st=statistics(errors)
         endpoints=[(int(ts[i]),int(ts[j])) for i,j in pairs]
@@ -143,8 +146,10 @@ def evaluate_matched(folder, profile, labels):
         metric=metrics.APE(relation);metric.process_data((ref,est))
         emit(name,metric.error,unit,[(i,i) for i in range(len(ts))])
     specs=[('0.1s',time_pairs(ts,.1)),('1s',time_pairs(ts,1.))]
-    if profile=='motion':
+    if profile=='motion' and sampling!='mocap':
         specs += [(f'{d:g}m',filters.filter_pairs_by_path(ref.poses_se3,d,d*.1,all_pairs=True)) for d in (.1,.5,1.)]
+    if profile=='motion' and sampling=='mocap':
+        specs += [(f'{d:g}m',[]) for d in (.1,.5,1.)]
     for key,candidates in specs:
         pairs=[(i,j) for i,j in candidates if labels[i]==labels[j]]
         errors=[metrics.RPE.rpe_base(ref.poses_se3[i],ref.poses_se3[j],est.poses_se3[i],est.poses_se3[j]) for i,j in pairs]
@@ -152,6 +157,10 @@ def evaluate_matched(folder, profile, labels):
         angles=np.rad2deg(Rotation.from_matrix(np.array([e[:3,:3] for e in errors])).magnitude()) if errors else []
         emit('rpe_translation_'+key,trans,'m',pairs,len(candidates))
         emit('rre_rotation_'+key,angles,'deg',pairs,len(candidates))
+    if sampling=='mocap':
+        for name in out['unavailable_metrics']:
+            if name.endswith('m'):
+                out['unavailable_metrics'][name]='Sparse Mocap does not measure travelled path between endpoints'
     if profile=='static':
         pos=raw.positions_xyz;rs=Rotation.from_quat(raw.orientations_quat_wxyz[:,[1,2,3,0]])
         n0=np.flatnonzero(ts-ts[0]<=1e9);n1=np.flatnonzero(ts[-1]-ts<=1e9)
@@ -221,6 +230,7 @@ def plot_comparison(output, scope, records, origin_ns):
 
 
 def compare(a):
+    sampling=getattr(a,'evaluation_sampling','vio')
     output=a.output;output.mkdir(parents=True,exist_ok=True)
     snapshot=output/'inputs/evaluator_sources';snapshot.mkdir(parents=True,exist_ok=True)
     source_hashes={}
@@ -229,7 +239,7 @@ def compare(a):
         source_hashes[name]=hashlib.sha256(p.read_bytes()).hexdigest()
     lo=a.input_first_ns+int(a.start*10**9);hi=a.input_first_ns+int(a.end*10**9) if a.end is not None else None
     tracks={name:[r for r in load(p,'wxyz') if r[0]>=lo and (hi is None or r[0]<=hi)] for name,p in [('okvis',a.okvis),('basalt',a.basalt)]}
-    result_data=dict(profile=a.evaluation_profile,evaluator_sources=source_hashes,
+    result_data=dict(profile=a.evaluation_profile,sampling=sampling,gt_interpolated=sampling!='mocap',evaluator_sources=source_hashes,
         alignment='Initial 1 s mean pose SE(3)' if a.evaluation_profile=='static' else 'Full matched-trajectory position SE(3)',
         scale_corrected=False,time_offset='Frozen per-recording IMU GT; no VIO fitting',origin_ns=a.input_first_ns,
         native={},common={},quality_status='NOT_GATED',
@@ -243,15 +253,19 @@ def compare(a):
         if not poses:
             result_data['native'][name]={'metrics':{},'unavailable_metrics':{'all':'Empty trajectory window'}};native_labels[name]={};matched[name]=[];continue
         write(poses,d)
-        try:info=interpolate(a.groundtruth,d/'trajectory.tum',d)
+        try:
+            info=(sample_at_mocap(a.groundtruth,d/'trajectory.tum',d,states=a.basalt_states if name=='basalt' else None)
+                  if sampling=='mocap' else interpolate(a.groundtruth,d/'trajectory.tum',d))
         except ValueError as e:
             if 'Fewer than 5 valid' not in str(e):raise
             result_data['native'][name]={'metrics':{},'unavailable_metrics':{'all':str(e)}};native_labels[name]={};matched[name]=[];continue
         ts=timestamps(d/'vio_matched.tum')
-        labels=segment_labels(ts,a.groundtruth,a.basalt_states if name=='basalt' else None)
+        labels=segment_labels(ts,a.groundtruth,a.basalt_states if name=='basalt' else None,sampling,[r[0] for r in poses])
         native_labels[name]=dict(zip(map(int,ts),map(int,labels)))
         accepted=set(map(int,ts));matched[name]=[r for r in poses if r[0] in accepted]
-        record=evaluate_matched(d,a.evaluation_profile,labels);record['interpolation']=info
+        if sampling=='mocap':
+            matched[name]=[(int(t),list(map(float,line.split()[1:]))) for t,line in zip(ts,(d/'vio_matched.tum').read_text().splitlines())]
+        record=evaluate_matched(d,a.evaluation_profile,labels,sampling);record['interpolation']=info
         result_data['native'][name]=record;save(d/'segments.json',labels.tolist());save(d/'metrics.json',record)
     common=sorted(set(native_labels['okvis'])&set(native_labels['basalt']))
     result_data['common_timestamps']=dict(n=len(common),status='complete' if len(common)>=5 else 'unavailable')
@@ -260,9 +274,9 @@ def compare(a):
         labels=common_labels(common,native_labels);commonset=set(common)
         for name in tracks:
             d=output/'common'/name;write([r for r in matched[name] if r[0] in commonset],d)
-            info=interpolate(a.groundtruth,d/'trajectory.tum',d)
+            info=(sample_at_mocap(a.groundtruth,d/'trajectory.tum',d) if sampling=='mocap' else interpolate(a.groundtruth,d/'trajectory.tum',d))
             if list(map(int,timestamps(d/'vio_matched.tum')))!=common:raise ValueError('Common interpolation changed timestamp set')
-            record=evaluate_matched(d,a.evaluation_profile,labels);record['interpolation']=info
+            record=evaluate_matched(d,a.evaluation_profile,labels,sampling);record['interpolation']=info
             result_data['common'][name]=record;save(d/'segments.json',labels.tolist());save(d/'metrics.json',record)
         if (output/'common/okvis/mocap_at_vio.tum').read_bytes()!=(output/'common/basalt/mocap_at_vio.tum').read_bytes():
             raise ValueError('Common GT differs')

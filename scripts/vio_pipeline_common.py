@@ -106,6 +106,7 @@ def main():
     ap.add_argument('--binary',type=Path,default=ROOT/'build-vio/okvis_app_synchronous')
     ap.add_argument('--imu-bias-policy',choices=['require-zero','estimate-from-zero'])
     ap.add_argument('--evaluation-profile',choices=['legacy','static','motion'])
+    ap.add_argument('--evaluation-sampling',choices=['vio','mocap'])
     add_sampling_argument(ap)
     a=ap.parse_args()
     if a.vio_max_frames is not None and a.vio_max_frames<0:ap.error('Frame limit must be nonnegative')
@@ -125,9 +126,11 @@ def main():
         params=dict(basalt_run=str(a.basalt_run),calibration_dir=str(a.calibration_dir),config=str(a.config),
                     config_sha256=sha(a.config),dataset=info['dataset_identity'],prepared_dataset=str(info['dataset']))
         params['imu_bias_policy']=a.imu_bias_policy or 'require-zero'
-    if a.step=='report' and a.evaluation_profile is not None:
+    if a.step=='report' and (a.evaluation_profile is not None or a.evaluation_sampling is not None):
         ap.error('Report cannot relabel an existing evaluation')
     params['evaluation_profile']=a.evaluation_profile or params.get('evaluation_profile','legacy')
+    params['evaluation_sampling']=a.evaluation_sampling or params.get('evaluation_sampling','vio')
+    if params['evaluation_sampling']=='mocap' and params['evaluation_profile']=='legacy':ap.error('Mocap sampling requires static or motion profile')
     a.vio_max_frames=a.vio_max_frames if a.vio_max_frames is not None else (prior or {}).get('vio',{}).get('max_frames',0)
     if a.step=='report':
         from generate_pipeline_report import generate
@@ -293,7 +296,7 @@ def main():
         args=[sys.executable,ROOT/'scripts/compare_vio_runs.py','--okvis',artifact(path,'trajectory'),
             '--basalt',artifact(path,'basalt'),'--groundtruth',artifact(path,'gt'),'--output',d,
             '--input-first-ns',json.loads(artifact(path,'vio_summary').read_text())['input_first_imu_ns'],
-            '--evaluation-profile',params['evaluation_profile']]
+            '--evaluation-profile',params['evaluation_profile'],'--evaluation-sampling',params['evaluation_sampling']]
         states=ref/'inputs/basalt_states.csv'
         if states.is_file():args+=['--basalt-states',states]
         command('compare',args)

@@ -208,7 +208,7 @@ def generate(run, automatic=False):
             file_block('完整运行配置，包含相机标定、mask 路径、时间偏移和算法参数。',artifact(run,'config'),effective,raw=True))
     section('coverage','覆盖率与资源统计',file_block('VIO 输出帧数、缺帧、首尾覆盖、特征统计和运行资源汇总。',artifact(run,'vio_summary'),vio))
     alignment=('静止：起始 1 s 平均位姿对齐。' if comp.get('profile')=='static' else '运动：整段位置 SE(3) 对齐。') if poc else '各自进行 SE(3) 对齐。'
-    section('metrics','Common · 位姿误差','<p>双方与 GT 均有效的共同时间戳；'+alignment+'均不拟合尺度。'+('RPE/RRE 帧对使用双方连续区间交集并核对端点一致。' if poc else '')+'表内数值显示 6 位有效数字；平移 m、旋转 deg。不可计算的指标显示 —。</p>'+metric_table('common'))
+    section('metrics','Common · 位姿误差','<p>双方与 GT 均有效的共同时间戳；'+alignment+'均不拟合尺度。'+('RPE/RRE 帧对使用双方连续区间交集并核对端点一致。' if poc else '')+('仅使用实测 Mocap 位姿，GT 不插值；估计轨迹以相邻输出插值，括号跨度≤50 ms。稀疏采样密度不均；距离型指标不可计算。' if comp.get('sampling')=='mocap' else '')+'表内数值显示 6 位有效数字；平移 m、旋转 deg。不可计算的指标显示 —。</p>'+metric_table('common'))
     section('figures','Common · 图表对比',paired_figures('common'))
     section('native','Native · 各自覆盖范围','<details><summary>展开 Native 指标与图表</summary><p>各算法使用自身与 GT 匹配的有效时间戳。</p>'+metric_table('native')+paired_figures('native')+'</details>')
     mask_status=('实际使用的 Mask 与 Basalt 默认 Mask 不同，已自动展开。' if masks['changed'] else
